@@ -35,6 +35,7 @@ Simplest usage example:
 ```lua
 local sha2 = require("sha2")
 local your_hash = sha2.sha256("your string")
+-- assert(your_hash == "d14d691dac70eada14d9f23ef80091bca1c75cf77cf1cd5cf2d04180ca0d9911")
 ```
 See file "sha2_test.lua" for more examples.
 
