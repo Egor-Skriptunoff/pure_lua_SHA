@@ -64,6 +64,7 @@ Probably, this is the fastest pure Lua implementation of SHA2 you can find.
 local sha2 = require("sha2")
 local your_hex_hash = sha2.sha256("your string")
 local your_binary_hash = your_hex_hash:gsub("%x%x", function(h) return h.char(tonumber(h, 16)) end)
+-- assert(your_binary_hash == "\209Mi\29\172p\234\218\20\217\242>\248\0\145\188\161\199\\\247|\241\205\\\242\208A\128\202\r\153\17")
 ```
 ---
 ### Backward-compatibility
