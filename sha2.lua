@@ -225,21 +225,18 @@ elseif branch == "EMUL" then
       return r * 2^32 + (x - r)
    end
 
-   local AND_of_two_bytes = {}  -- look-up table (256*256 entries)
-   for idx = 0, 65535 do
-      local x = idx % 256
-      local y = (idx - x) / 256
-      local res = 0
-      local w = 1
-      while x * y ~= 0 do
-         local rx = x % 2
-         local ry = y % 2
-         res = res + rx * ry * w
-         x = (x - rx) / 2
-         y = (y - ry) / 2
-         w = w * 2
+   local AND_of_two_bytes = {[0] = 0}  -- look-up table (256*256 entries)
+   local idx = 0
+   for y = 0, 127 * 256, 256 do
+      for x = 0, 127 do
+         x = AND_of_two_bytes[y + x] * 2
+         AND_of_two_bytes[idx] = x
+         AND_of_two_bytes[idx + 1] = x
+         AND_of_two_bytes[idx + 256] = x
+         AND_of_two_bytes[idx + 257] = x + 1
+         idx = idx + 2
       end
-      AND_of_two_bytes[idx] = res
+      idx = idx + 256
    end
 
    local function and_or_xor(x, y, operation)
