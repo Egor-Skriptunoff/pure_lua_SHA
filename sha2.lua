@@ -3,7 +3,7 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- MODULE: sha2
 --
--- VERSION: 1 (2018-10-06)
+-- VERSION: 2 (2018-10-07)
 --
 -- DESCRIPTION:
 --    This module contains functions to calculate SHA2 digest:
@@ -36,6 +36,7 @@
 -- CHANGELOG:
 --  version     date      description
 --     1     2018-10-06   First release
+--     2     2018-10-07   Decreased module loading time in Lua 5.1 implementation branch (thanks to Peter Melnichenko for giving a hint)
 -----------------------------------------------------------------------------
 
 
