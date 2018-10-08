@@ -3,7 +3,7 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- MODULE: sha2
 --
--- VERSION: 2 (2018-10-07)
+-- VERSION: 2 (2018-10-08)
 --
 -- DESCRIPTION:
 --    This module contains functions to calculate SHA2 digest:
@@ -229,8 +229,8 @@ elseif branch == "EMUL" then
    local AND_of_two_bytes = {[0] = 0}  -- look-up table (256*256 entries)
    local idx = 0
    for y = 0, 127 * 256, 256 do
-      for x = 0, 127 do
-         x = AND_of_two_bytes[y + x] * 2
+      for x = y, y + 127 do
+         x = AND_of_two_bytes[x] * 2
          AND_of_two_bytes[idx] = x
          AND_of_two_bytes[idx + 1] = x
          AND_of_two_bytes[idx + 256] = x
