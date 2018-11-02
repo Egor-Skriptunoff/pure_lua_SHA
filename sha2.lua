@@ -3,7 +3,7 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- MODULE: sha2
 --
--- VERSION: 2 (2018-10-08)
+-- VERSION: 3 (2018-11-02)
 --
 -- DESCRIPTION:
 --    This module contains functions to calculate SHA2 digest:
@@ -23,7 +23,7 @@
 --       - branch for LuaJIT 2.1 with FFI library (bit.* functions can work with "int64_t" arguments)
 --
 -- USAGE:
---    Input data should be provided as a binary string: either as a whole string or as a sequence of substrings (chunk-by-chunk loading).
+--    Input data should be provided as a binary string: either as a whole string or as a sequence of substrings (chunk-by-chunk loading, total length < 9*10^15 bytes).
 --    Result (SHA2 digest) is returned in hexadecimal representation as a string of lowercase hex digits.
 --    Simplest usage example:
 --       local sha2 = require("sha2")
@@ -37,6 +37,7 @@
 --  version     date      description
 --     1     2018-10-06   First release
 --     2     2018-10-07   Decreased module loading time in Lua 5.1 implementation branch (thanks to Peter Melnichenko for giving a hint)
+--     3     2018-11-02   Bug fixed: incorrect hashing of long (2 GByte) data streams on Lua built with "int32" integers
 -----------------------------------------------------------------------------
 
 
@@ -1185,7 +1186,7 @@ end
 local function sha256ext(width, text)
 
    -- Create an instance (private objects for current calculation)
-   local H, length, tail = {unpack(sha2_H_ext256[width])}, 0, ""
+   local H, length, tail = {unpack(sha2_H_ext256[width])}, 0.0, ""
 
    local function partial(text_part)
       if text_part then
@@ -1209,7 +1210,7 @@ local function sha256ext(width, text)
          if tail then
             local final_blocks = {tail, "\128", string_rep("\0", (-9 - length) % 64 + 1)}
             tail = nil
-            -- Assuming user data length is shorter than 2^53 bytes
+            -- Assuming user data length is shorter than (2^53)-9 bytes
             -- Anyway, it looks very unrealistic that someone would spend more than a year of calculations to process 2^53 bytes of data by using this Lua script :-)
             -- 2^53 bytes = 2^56 bits, so "bit-counter" fits in 7 bytes
             length = length * (8 / 256^7)  -- convert "byte-counter" to "bit-counter" and move decimal point to the left
@@ -1244,7 +1245,7 @@ end
 local function sha512ext(width, text)
 
    -- Create an instance (private objects for current calculation)
-   local length, tail, H_lo, H_hi = 0, "", { unpack(sha2_H_ext512_lo[width]) }, not HEX64 and { unpack(sha2_H_ext512_hi[width]) }
+   local length, tail, H_lo, H_hi = 0.0, "", { unpack(sha2_H_ext512_lo[width]) }, not HEX64 and { unpack(sha2_H_ext512_hi[width]) }
 
    local function partial(text_part)
       if text_part then
@@ -1268,7 +1269,7 @@ local function sha512ext(width, text)
          if tail then
             local final_blocks = {tail, "\128", string_rep("\0", (-17-length) % 128 + 9)}
             tail = nil
-            -- Assuming user data length is shorter than 2^53 bytes
+            -- Assuming user data length is shorter than (2^53)-17 bytes
             -- 2^53 bytes = 2^56 bits, so "bit-counter" fits in 7 bytes
             length = length * (8 / 256^7)  -- convert "byte-counter" to "bit-counter" and move floating point to the left
             for j = 4, 10 do
