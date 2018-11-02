@@ -3,11 +3,12 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- MODULE: sha2
 --
--- VERSION: 3 (2018-11-02)
+-- VERSION: 4 (2018-11-03)
 --
 -- DESCRIPTION:
 --    This module contains functions to calculate SHA2 digest:
 --       SHA-224, SHA-256, SHA-384, SHA-512, SHA-512/224, SHA-512/256
+--       and a bonus: MD5
 --    Written in pure Lua.
 --    Compatible with:
 --       Lua 5.1, Lua 5.2, Lua 5.3, Lua 5.4, Fengari, LuaJIT 2.0/2.1 (any CPU endianness).
@@ -37,14 +38,15 @@
 --  version     date      description
 --     1     2018-10-06   First release
 --     2     2018-10-07   Decreased module loading time in Lua 5.1 implementation branch (thanks to Peter Melnichenko for giving a hint)
---     3     2018-11-02   Bug fixed: incorrect hashing of long (2 GByte) data streams on Lua built with "int32" integers
+--     3     2018-11-02   Bug fixed: incorrect hashing of long (2 GByte) data streams on Lua 5.3/5.4 built with "int32" integers
+--     4     2018-11-03   Bonus added (MD5)
 -----------------------------------------------------------------------------
 
 
 local print_debug_messages = false  -- set to true to view some messages about your system's abilities and which implementation branch was chosen for your system
 
-local unpack, table_concat, byte, char, string_rep, sub, string_format, floor, ceil, tonumber =
-   table.unpack or unpack, table.concat, string.byte, string.char, string.rep, string.sub, string.format, math.floor, math.ceil, tonumber
+local unpack, table_concat, byte, char, string_rep, sub, gsub, string_format, floor, ceil, tonumber =
+   table.unpack or unpack, table.concat, string.byte, string.char, string.rep, string.sub, string.gsub, string.format, math.floor, math.ceil, tonumber
 
 --------------------------------------------------------------------------------
 -- EXAMINING YOUR SYSTEM
@@ -151,7 +153,7 @@ end
 
 -- Selecting the most suitable implementation for given set of abilities
 local method, branch
-if ffi then
+if is_LuaJIT and ffi then
    method = "Using 'ffi' library of LuaJIT"
    branch = "FFI"
 elseif is_LuaJIT then
@@ -182,7 +184,7 @@ end
 --------------------------------------------------------------------------------
 
 -- 32-bit bitwise functions
-local AND, OR, XOR, SHL, SHR, ROL, ROR, NORM, HEX
+local AND, OR, XOR, SHL, SHR, ROL, ROR, NOT, NORM, HEX
 -- Only low 32 bits of function arguments matter, high bits are ignored
 -- The result of all functions (except HEX) is an integer inside "correct range":
 --    for "bit" library:    (-2^31)..(2^31-1)
@@ -198,9 +200,10 @@ if branch == "FFI" or branch == "LJ" or branch == "LIB32" then
    SHR  = b.rshift              -- second argument is integer 0..31
    ROL  = b.rol or b.lrotate    -- second argument is integer 0..31
    ROR  = b.ror or b.rrotate    -- second argument is integer 0..31
+   NOT  = b.bnot
    NORM = b.tobit
    HEX  = b.tohex               -- returns string of 8 lowercase hexadecimal digits
-   assert(AND and OR and XOR and SHL and SHR and ROL and ROR, "Library '"..library_name.."' is incomplete")
+   assert(AND and OR and XOR and SHL and SHR and ROL and ROR and NOT, "Library '"..library_name.."' is incomplete")
 
 elseif branch == "EMUL" then
 
@@ -295,12 +298,13 @@ end
 --------------------------------------------------------------------------------
 
 -- Inner loop functions
-local sha256_feed_64, sha512_feed_128
+local sha256_feed_64, sha512_feed_128, md5_feed_64
 
 -- Arrays of SHA2 "magic numbers" (in "INT64" and "FFI" branches "*_lo" arrays contain 64-bit values)
 local sha2_K_lo, sha2_K_hi, sha2_H_lo, sha2_H_hi = {}, {}, {}, {}
 local sha2_H_ext256 = {[224] = {}, [256] = sha2_H_hi}
 local sha2_H_ext512_lo, sha2_H_ext512_hi = {[384] = {}, [512] = sha2_H_lo}, {[384] = {}, [512] = sha2_H_hi}
+local md5_K, md5_H, md5_next_shift = {}, {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476}, {0, 0, 0, 0, 0, 0, 0, 0, 28, 25, 26, 27, 0, 0, 10, 9, 11, 12, 0, 15, 16, 17, 18, 0, 20, 22, 23, 21}
 
 local HEX64, XOR64A5   -- defined only for branches that internally use 64-bit integers: "INT64" and "FFI"
 local common_W = {}    -- temporary table shared between all calculations (to avoid creating new temporary table every time)
@@ -311,11 +315,11 @@ if branch == "FFI" then
 
    -- SHA256 implementation for "LuaJIT with FFI" branch
 
-   local common_W_FFI_SHA256 = ffi.new"int32_t[64]"
+   local common_W_FFI_int32 = ffi.new"int32_t[64]"
 
    function sha256_feed_64(H, K, str, offs, size)
-      local W = common_W_FFI_SHA256
       -- offs >= 0, size >= 0, size is multiple of 64
+      local W = common_W_FFI_int32
       for pos = offs, offs + size - 1, 64 do
          for j = 0, 15 do
             pos = pos + 4
@@ -328,28 +332,28 @@ if branch == "FFI" then
          end
          local a, b, c, d, e, f, g, h = H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8]
          for j = 0, 63, 8 do  -- Thanks to Peter Cawley for this workaround (unroll the loop to avoid "PHI shuffling too complex" due to PHIs overlap)
-            local z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + h + W[j] + K[j+1] )
+            local z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + (W[j] + K[j+1] + h) )
             h, g, f, e = g, f, e, NORM( d + z )
             d, c, b, a = c, b, a, NORM( XOR(AND(a, XOR(b, c)), AND(b, c)) + XOR(ROR(a, 2), ROR(a, 13), ROL(a, 10)) + z )
-            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + h + W[j+1] + K[j+2] )
+            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + (W[j+1] + K[j+2] + h) )
             h, g, f, e = g, f, e, NORM( d + z )
             d, c, b, a = c, b, a, NORM( XOR(AND(a, XOR(b, c)), AND(b, c)) + XOR(ROR(a, 2), ROR(a, 13), ROL(a, 10)) + z )
-            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + h + W[j+2] + K[j+3] )
+            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + (W[j+2] + K[j+3] + h) )
             h, g, f, e = g, f, e, NORM( d + z )
             d, c, b, a = c, b, a, NORM( XOR(AND(a, XOR(b, c)), AND(b, c)) + XOR(ROR(a, 2), ROR(a, 13), ROL(a, 10)) + z )
-            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + h + W[j+3] + K[j+4] )
+            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + (W[j+3] + K[j+4] + h) )
             h, g, f, e = g, f, e, NORM( d + z )
             d, c, b, a = c, b, a, NORM( XOR(AND(a, XOR(b, c)), AND(b, c)) + XOR(ROR(a, 2), ROR(a, 13), ROL(a, 10)) + z )
-            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + h + W[j+4] + K[j+5] )
+            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + (W[j+4] + K[j+5] + h) )
             h, g, f, e = g, f, e, NORM( d + z )
             d, c, b, a = c, b, a, NORM( XOR(AND(a, XOR(b, c)), AND(b, c)) + XOR(ROR(a, 2), ROR(a, 13), ROL(a, 10)) + z )
-            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + h + W[j+5] + K[j+6] )
+            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + (W[j+5] + K[j+6] + h) )
             h, g, f, e = g, f, e, NORM( d + z )
             d, c, b, a = c, b, a, NORM( XOR(AND(a, XOR(b, c)), AND(b, c)) + XOR(ROR(a, 2), ROR(a, 13), ROL(a, 10)) + z )
-            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + h + W[j+6] + K[j+7] )
+            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + (W[j+6] + K[j+7] + h) )
             h, g, f, e = g, f, e, NORM( d + z )
             d, c, b, a = c, b, a, NORM( XOR(AND(a, XOR(b, c)), AND(b, c)) + XOR(ROR(a, 2), ROR(a, 13), ROL(a, 10)) + z )
-            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + h + W[j+7] + K[j+8] )
+            z = NORM( XOR(g, AND(e, XOR(f, g))) + XOR(ROR(e, 6), ROR(e, 11), ROL(e, 7)) + (W[j+7] + K[j+8] + h) )
             h, g, f, e = g, f, e, NORM( d + z )
             d, c, b, a = c, b, a, NORM( XOR(AND(a, XOR(b, c)), AND(b, c)) + XOR(ROR(a, 2), ROR(a, 13), ROL(a, 10)) + z )
          end
@@ -358,7 +362,7 @@ if branch == "FFI" then
       end
    end
 
-   local common_W_FFI = ffi.new"int64_t[80]"
+   local common_W_FFI_int64 = ffi.new"int64_t[80]"
    local int64 = ffi.typeof"int64_t"
    local int32 = ffi.typeof"int32_t"
    local uint32 = ffi.typeof"uint32_t"
@@ -381,7 +385,7 @@ if branch == "FFI" then
 
       function sha512_feed_128(H, _, K, _, str, offs, size)
          -- offs >= 0, size >= 0, size is multiple of 128
-         local W = common_W_FFI
+         local W = common_W_FFI_int64
          for pos = offs, offs + size - 1, 128 do
             for j = 0, 15 do
                pos = pos + 8
@@ -526,7 +530,7 @@ if branch == "FFI" then
 
       function sha512_feed_128(H, _, K, _, str, offs, size)
          -- offs >= 0, size >= 0, size is multiple of 128
-         local W = common_W_FFI
+         local W = common_W_FFI_int64
          for pos = offs, offs + size - 1, 128 do
             for j = 0, 15 do
                pos = pos + 8
@@ -576,7 +580,51 @@ if branch == "FFI" then
 
    end
 
+   -- MD5 implementation for "LuaJIT with FFI" branch
+
+   function md5_feed_64(H, K, str, offs, size)
+      -- offs >= 0, size >= 0, size is multiple of 64
+      local W = common_W_FFI_int32
+      for pos = offs, offs + size - 1, 64 do
+         for j = 0, 15 do
+            pos = pos + 4
+            local a, b, c, d = byte(str, pos - 3, pos)   -- slow, but doesn't depend on endianness
+            W[j] = OR(SHL(d, 24), SHL(c, 16), SHL(b, 8), a)
+         end
+         local a, b, c, d = H[1], H[2], H[3], H[4]
+         for j = 0, 15, 4 do
+            a, d, c, b = d, c, b, NORM(ROL(XOR(d, AND(b, XOR(c, d))) + (K[j+1] + W[j  ] + a),  7) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(d, AND(b, XOR(c, d))) + (K[j+2] + W[j+1] + a), 12) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(d, AND(b, XOR(c, d))) + (K[j+3] + W[j+2] + a), 17) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(d, AND(b, XOR(c, d))) + (K[j+4] + W[j+3] + a), 22) + b)
+         end
+         for j = 16, 31, 4 do
+            local g = 5*j
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, AND(d, XOR(b, c))) + (K[j+1] + W[AND(g + 1, 15)] + a),  5) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, AND(d, XOR(b, c))) + (K[j+2] + W[AND(g + 6, 15)] + a),  9) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, AND(d, XOR(b, c))) + (K[j+3] + W[AND(g - 5, 15)] + a), 14) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, AND(d, XOR(b, c))) + (K[j+4] + W[AND(g    , 15)] + a), 20) + b)
+         end
+         for j = 32, 47, 4 do
+            local g = 3*j
+            a, d, c, b = d, c, b, NORM(ROL(XOR(b, c, d) + (K[j+1] + W[AND(g + 5, 15)] + a),  4) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(b, c, d) + (K[j+2] + W[AND(g + 8, 15)] + a), 11) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(b, c, d) + (K[j+3] + W[AND(g - 5, 15)] + a), 16) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(b, c, d) + (K[j+4] + W[AND(g - 2, 15)] + a), 23) + b)
+         end
+         for j = 48, 63, 4 do
+            local g = 7*j
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, OR(b, NOT(d))) + (K[j+1] + W[AND(g    , 15)] + a),  6) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, OR(b, NOT(d))) + (K[j+2] + W[AND(g + 7, 15)] + a), 10) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, OR(b, NOT(d))) + (K[j+3] + W[AND(g - 2, 15)] + a), 15) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, OR(b, NOT(d))) + (K[j+4] + W[AND(g + 5, 15)] + a), 21) + b)
+         end
+         H[1], H[2], H[3], H[4] = NORM(a + H[1]), NORM(b + H[2]), NORM(c + H[3]), NORM(d + H[4])
+      end
+   end
+
 end
+
 
 if branch == "LJ" then
 
@@ -747,15 +795,60 @@ if branch == "LJ" then
 
    end
 
+   -- MD5 implementation for "LuaJIT without FFI" branch
+
+   function md5_feed_64(H, K, str, offs, size)
+      -- offs >= 0, size >= 0, size is multiple of 64
+      local W = common_W
+      for pos = offs, offs + size - 1, 64 do
+         for j = 1, 16 do
+            pos = pos + 4
+            local a, b, c, d = byte(str, pos - 3, pos)
+            W[j] = OR(SHL(d, 24), SHL(c, 16), SHL(b, 8), a)
+         end
+         local a, b, c, d = H[1], H[2], H[3], H[4]
+         for j = 1, 16, 4 do
+            a, d, c, b = d, c, b, NORM(ROL(XOR(d, AND(b, XOR(c, d))) + (K[j  ] + W[j  ] + a),  7) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(d, AND(b, XOR(c, d))) + (K[j+1] + W[j+1] + a), 12) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(d, AND(b, XOR(c, d))) + (K[j+2] + W[j+2] + a), 17) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(d, AND(b, XOR(c, d))) + (K[j+3] + W[j+3] + a), 22) + b)
+         end
+         for j = 17, 32, 4 do
+            local g = 5*j-4
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, AND(d, XOR(b, c))) + (K[j  ] + W[AND(g     , 15) + 1] + a),  5) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, AND(d, XOR(b, c))) + (K[j+1] + W[AND(g +  5, 15) + 1] + a),  9) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, AND(d, XOR(b, c))) + (K[j+2] + W[AND(g + 10, 15) + 1] + a), 14) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, AND(d, XOR(b, c))) + (K[j+3] + W[AND(g -  1, 15) + 1] + a), 20) + b)
+         end
+         for j = 33, 48, 4 do
+            local g = 3*j+2
+            a, d, c, b = d, c, b, NORM(ROL(XOR(b, c, d) + (K[j  ] + W[AND(g    , 15) + 1] + a),  4) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(b, c, d) + (K[j+1] + W[AND(g + 3, 15) + 1] + a), 11) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(b, c, d) + (K[j+2] + W[AND(g + 6, 15) + 1] + a), 16) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(b, c, d) + (K[j+3] + W[AND(g - 7, 15) + 1] + a), 23) + b)
+         end
+         for j = 49, 64, 4 do
+            local g = j*7
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, OR(b, NOT(d))) + (K[j  ] + W[AND(g - 7, 15) + 1] + a),  6) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, OR(b, NOT(d))) + (K[j+1] + W[AND(g    , 15) + 1] + a), 10) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, OR(b, NOT(d))) + (K[j+2] + W[AND(g + 7, 15) + 1] + a), 15) + b)
+            a, d, c, b = d, c, b, NORM(ROL(XOR(c, OR(b, NOT(d))) + (K[j+3] + W[AND(g - 2, 15) + 1] + a), 21) + b)
+         end
+         H[1], H[2], H[3], H[4] = NORM(a + H[1]), NORM(b + H[2]), NORM(c + H[3]), NORM(d + H[4])
+      end
+   end
+
 end
+
 
 if branch == "INT64" then
 
-   -- implementation of both SHA256 and SHA512 for Lua 5.3/5.4
+   -- implementation for Lua 5.3/5.4
 
    hi_factor = 4294967296
 
-   HEX64, XOR64A5, sha256_feed_64, sha512_feed_128 = load[[
+   HEX64, XOR64A5, sha256_feed_64, sha512_feed_128, md5_feed_64 = load[[
+      local md5_next_shift = ...
       local string_format, string_unpack = string.format, string.unpack
 
       local function HEX64(x)
@@ -844,14 +937,67 @@ if branch == "INT64" then
          H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8] = h1, h2, h3, h4, h5, h6, h7, h8
       end
 
-      return HEX64, XOR64A5, sha256_feed_64, sha512_feed_128
-   ]]()
+      local function md5_feed_64(H, K, str, offs, size)
+         -- offs >= 0, size >= 0, size is multiple of 64
+         local W, md5_next_shift = common_W, md5_next_shift
+         local h1, h2, h3, h4 = H[1], H[2], H[3], H[4]
+         for pos = offs + 1, offs + size, 64 do
+            W[1], W[2], W[3], W[4], W[5], W[6], W[7], W[8], W[9], W[10], W[11], W[12], W[13], W[14], W[15], W[16] =
+               string_unpack("<I4I4I4I4I4I4I4I4I4I4I4I4I4I4I4I4", str, pos)
+            local a, b, c, d = h1, h2, h3, h4
+            local s = 32-7
+            for j = 1, 16 do
+               local F = (d ~ b & (c ~ d)) + a + K[j] + W[j]
+               a = d
+               d = c
+               c = b
+               b = ((F<<32 | F & (1<<32)-1) >> s) + b
+               s = md5_next_shift[s]
+            end
+            s = 32-5
+            for j = 17, 32 do
+               local F = (c ~ d & (b ~ c)) + a + K[j] + W[(5*j-4 & 15) + 1]
+               a = d
+               d = c
+               c = b
+               b = ((F<<32 | F & (1<<32)-1) >> s) + b
+               s = md5_next_shift[s]
+            end
+            s = 32-4
+            for j = 33, 48 do
+               local F = (b ~ c ~ d) + a + K[j] + W[(3*j+2 & 15) + 1]
+               a = d
+               d = c
+               c = b
+               b = ((F<<32 | F & (1<<32)-1) >> s) + b
+               s = md5_next_shift[s]
+            end
+            s = 32-6
+            for j = 49, 64 do
+               local F = (c ~ (b | ~d)) + a + K[j] + W[(j*7-7 & 15) + 1]
+               a = d
+               d = c
+               c = b
+               b = ((F<<32 | F & (1<<32)-1) >> s) + b
+               s = md5_next_shift[s]
+            end
+            h1 = a + h1
+            h2 = b + h2
+            h3 = c + h3
+            h4 = d + h4
+         end
+         H[1], H[2], H[3], H[4] = h1, h2, h3, h4
+      end
+
+      return HEX64, XOR64A5, sha256_feed_64, sha512_feed_128, md5_feed_64
+   ]](md5_next_shift)
 
 end
 
+
 if branch == "INT32" then
 
-   -- implementation of both SHA256 and SHA512 for Lua 5.3/5.4 having non-standard numbers config "int32"+"double" (built with LUA_INT_TYPE=LUA_INT_INT)
+   -- implementation for Lua 5.3/5.4 having non-standard numbers config "int32"+"double" (built with LUA_INT_TYPE=LUA_INT_INT)
 
    K_lo_modulo = 2^32
 
@@ -859,7 +1005,8 @@ if branch == "INT32" then
       return string_format("%08x", x)
    end
 
-   XOR32A5, sha256_feed_64, sha512_feed_128 = load[[
+   XOR32A5, sha256_feed_64, sha512_feed_128, md5_feed_64 = load[[
+      local md5_next_shift = ...
       local string_unpack, floor = string.unpack, math.floor
 
       local function XOR32A5(x)
@@ -980,14 +1127,67 @@ if branch == "INT32" then
          H_hi[1], H_hi[2], H_hi[3], H_hi[4], H_hi[5], H_hi[6], H_hi[7], H_hi[8] = h1_hi, h2_hi, h3_hi, h4_hi, h5_hi, h6_hi, h7_hi, h8_hi
       end
 
-      return XOR32A5, sha256_feed_64, sha512_feed_128
-   ]]()
+      local function md5_feed_64(H, K, str, offs, size)
+         -- offs >= 0, size >= 0, size is multiple of 64
+         local W, md5_next_shift = common_W, md5_next_shift
+         local h1, h2, h3, h4 = H[1], H[2], H[3], H[4]
+         for pos = offs + 1, offs + size, 64 do
+            W[1], W[2], W[3], W[4], W[5], W[6], W[7], W[8], W[9], W[10], W[11], W[12], W[13], W[14], W[15], W[16] =
+               string_unpack("<i4i4i4i4i4i4i4i4i4i4i4i4i4i4i4i4", str, pos)
+            local a, b, c, d = h1, h2, h3, h4
+            local s = 32-7
+            for j = 1, 16 do
+               local F = (d ~ b & (c ~ d)) + a + K[j] + W[j]
+               a = d
+               d = c
+               c = b
+               b = (F << 32-s | F>>s) + b
+               s = md5_next_shift[s]
+            end
+            s = 32-5
+            for j = 17, 32 do
+               local F = (c ~ d & (b ~ c)) + a + K[j] + W[(5*j-4 & 15) + 1]
+               a = d
+               d = c
+               c = b
+               b = (F << 32-s | F>>s) + b
+               s = md5_next_shift[s]
+            end
+            s = 32-4
+            for j = 33, 48 do
+               local F = (b ~ c ~ d) + a + K[j] + W[(3*j+2 & 15) + 1]
+               a = d
+               d = c
+               c = b
+               b = (F << 32-s | F>>s) + b
+               s = md5_next_shift[s]
+            end
+            s = 32-6
+            for j = 49, 64 do
+               local F = (c ~ (b | ~d)) + a + K[j] + W[(j*7-7 & 15) + 1]
+               a = d
+               d = c
+               c = b
+               b = (F << 32-s | F>>s) + b
+               s = md5_next_shift[s]
+            end
+            h1 = a + h1
+            h2 = b + h2
+            h3 = c + h3
+            h4 = d + h4
+         end
+         H[1], H[2], H[3], H[4] = h1, h2, h3, h4
+      end
+
+      return XOR32A5, sha256_feed_64, sha512_feed_128, md5_feed_64
+   ]](md5_next_shift)
 
 end
 
+
 if branch == "LIB32" or branch == "EMUL" then
 
-   -- implementation of both SHA256 and SHA512 for Lua 5.1/5.2 (with or without bitwise library available)
+   -- implementation for Lua 5.1/5.2 (with or without bitwise library available)
 
    function sha256_feed_64(H, K, str, offs, size)
       -- offs >= 0, size >= 0, size is multiple of 64
@@ -1095,6 +1295,61 @@ if branch == "LIB32" or branch == "EMUL" then
       H_hi[1], H_hi[2], H_hi[3], H_hi[4], H_hi[5], H_hi[6], H_hi[7], H_hi[8] = h1_hi, h2_hi, h3_hi, h4_hi, h5_hi, h6_hi, h7_hi, h8_hi
    end
 
+   function md5_feed_64(H, K, str, offs, size)
+      -- offs >= 0, size >= 0, size is multiple of 64
+      local W, md5_next_shift = common_W, md5_next_shift
+      local h1, h2, h3, h4 = H[1], H[2], H[3], H[4]
+      for pos = offs, offs + size - 1, 64 do
+         for j = 1, 16 do
+            pos = pos + 4
+            local a, b, c, d = byte(str, pos - 3, pos)
+            W[j] = ((d * 256 + c) * 256 + b) * 256 + a
+         end
+         local a, b, c, d = h1, h2, h3, h4
+         local s = 32-7
+         for j = 1, 16 do
+            local F = ROR(AND(b, c) + AND(-1-b, d) + a + K[j] + W[j], s) + b
+            s = md5_next_shift[s]
+            a = d
+            d = c
+            c = b
+            b = F
+         end
+         s = 32-5
+         for j = 17, 32 do
+            local F = ROR(AND(d, b) + AND(-1-d, c) + a + K[j] + W[(5*j-4) % 16 + 1], s) + b
+            s = md5_next_shift[s]
+            a = d
+            d = c
+            c = b
+            b = F
+         end
+         s = 32-4
+         for j = 33, 48 do
+            local F = ROR(XOR(XOR(b, c), d) + a + K[j] + W[(3*j+2) % 16 + 1], s) + b
+            s = md5_next_shift[s]
+            a = d
+            d = c
+            c = b
+            b = F
+         end
+         s = 32-6
+         for j = 49, 64 do
+            local F = ROR(XOR(c, OR(b, -1-d)) + a + K[j] + W[(j*7-7) % 16 + 1], s) + b
+            s = md5_next_shift[s]
+            a = d
+            d = c
+            c = b
+            b = F
+         end
+         h1 = (a + h1) % 4294967296
+         h2 = (b + h2) % 4294967296
+         h3 = (c + h3) % 4294967296
+         h4 = (d + h4) % 4294967296
+      end
+      H[1], H[2], H[3], H[4] = h1, h2, h3, h4
+   end
+
 end
 
 --------------------------------------------------------------------------------
@@ -1177,6 +1432,16 @@ for width = 224, 256, 32 do
    sha512_feed_128(H_lo, H_hi, sha2_K_lo, sha2_K_hi, "SHA-512/"..tonumber(width).."\128"..string_rep("\0", 115).."\88", 0, 128)
    sha2_H_ext512_lo[width] = H_lo
    sha2_H_ext512_hi[width] = H_hi
+end
+
+-- Constants for MD5
+do
+   local sin, abs, modf = math.sin, math.abs, math.modf
+   for idx = 1, 64 do
+      -- we can't use formula floor(abs(sin(idx))*2^32) because its result may be not an integer on Lua built with 32-bit integers
+      local hi, lo = modf(abs(sin(idx)) * 2^16)
+      md5_K[idx] = hi * 65536 + floor(lo * 2^16)
+   end
 end
 
 --------------------------------------------------------------------------------
@@ -1306,13 +1571,73 @@ local function sha512ext(width, text)
 
 end
 
+
+local function md5(text)
+
+   -- Create an instance (private objects for current calculation)
+   local H, length, tail = {unpack(md5_H)}, 0.0, ""
+
+   local function partial(text_part)
+      if text_part then
+         if tail then
+            length = length + #text_part
+            local offs = 0
+            if tail ~= "" and #tail + #text_part >= 64 then
+               offs = 64 - #tail
+               md5_feed_64(H, md5_K, tail..sub(text_part, 1, offs), 0, 64)
+               tail = ""
+            end
+            local size = #text_part - offs
+            local size_tail = size % 64
+            md5_feed_64(H, md5_K, text_part, offs, size - size_tail)
+            tail = tail..sub(text_part, #text_part + 1 - size_tail)
+            return partial
+         else
+            error("Adding more chunks is not allowed after receiving the final result", 2)
+         end
+      else
+         if tail then
+            local final_blocks = {tail, "\128", string_rep("\0", (-9 - length) % 64)}
+            tail = nil
+            length = length * 8  -- convert "byte-counter" to "bit-counter"
+            for j = 4, 11 do
+               local low_byte = length % 256
+               final_blocks[j] = char(low_byte)
+               length = (length - low_byte) / 256
+            end
+            final_blocks = table_concat(final_blocks)
+            md5_feed_64(H, md5_K, final_blocks, 0, #final_blocks)
+            for j = 1, 4 do
+               H[j] = HEX(H[j])
+            end
+            H = gsub(table_concat(H), "(..)(..)(..)(..)", "%4%3%2%1")
+         end
+         return H
+      end
+   end
+
+   if text then
+      -- Actually perform calculations and return the MD5 digest of a message
+      return partial(text)()
+   else
+      -- Return function for chunk-by-chunk loading
+      -- User should feed every chunk of input data as single argument to this function and finally get MD5 digest by invoking this function without an argument
+      return partial
+   end
+
+end
+
+
 local sha2 = {
+   -- SHA2 functions:
    sha256     = function (text) return sha256ext(256, text) end,  -- SHA-256
    sha224     = function (text) return sha256ext(224, text) end,  -- SHA-224
    sha512     = function (text) return sha512ext(512, text) end,  -- SHA-512
    sha384     = function (text) return sha512ext(384, text) end,  -- SHA-384
    sha512_224 = function (text) return sha512ext(224, text) end,  -- SHA-512/224
    sha512_256 = function (text) return sha512ext(256, text) end,  -- SHA-512/256
+   -- bonus:
+   md5        = md5,                                              -- MD5
 }
 
 return sha2

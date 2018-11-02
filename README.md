@@ -24,6 +24,8 @@ SHA-384        -- sha2.sha384()
 SHA-512        -- sha2.sha512()
 SHA-512/224    -- sha2.sha512_224()
 SHA-512/256    -- sha2.sha512_256()
+-- and a small bonus:
+MD5            -- sha2.md5()
 ```
 ---
 ### Usage

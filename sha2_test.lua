@@ -266,7 +266,28 @@ local function test_sha512()
 end
 
 
-local function test_sha2()
+local function test_md5()
+
+   local md5 = sha2.md5
+
+   assert(md5"" == "d41d8cd98f00b204e9800998ecf8427e")
+   assert(md5"a" == "0cc175b9c0f1b6a831c399e269772661")
+   assert(md5"abc" == "900150983cd24fb0d6963f7d28e17f72")
+   assert(md5"message digest" == "f96b697d7cb7938d525a2f31aaf161d0")
+   assert(md5"abcdefghijklmnopqrstuvwxyz" == "c3fcd3d76192e4007dfb496cca67e13b")
+   assert(md5"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" == "8215ef0796a20bcaaae116d3876c664a")
+   assert(md5"The quick brown fox jumps over the lazy dog" == "9e107d9d372bb6826bd81d3542a419d6")
+   assert(md5"The quick brown fox jumps over the lazy dog." == "e4d909c290d0fb1ca068ffaddf22cbd0")
+   assert(md5"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" == "d174ab98d277d9f5a5611c2c9f419d9f")
+   assert(md5(("1234567890"):rep(8)) == "57edf4a22be3c955ac49da2e2107b67a")
+   assert(md5(("\255"):rep(54)) == "30855eb73c2f88ffc3005b998ca4cd69")
+   assert(md5(("\255"):rep(55)) == "fd696aa639acaba9ce0e0964028fbe81")
+   assert(md5(("\255"):rep(56)) == "74444b7e7b01632f3277365c8ca35ec2")
+
+end
+
+
+local function test_all()
 
    test_sha256()
 
@@ -284,9 +305,48 @@ local function test_sha2()
    assert(sha2.sha512_256"abc" == "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23")
    assert(sha2.sha512_256"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu" == "3928e184fb8690f840da3988121d31be65cb9d3ef83ee6146feac861e19b563a")
 
+   test_md5()
+
    print"All tests passed"
 
 end
 
 
-test_sha2()
+test_all()
+
+--------------------------------------------------------------------------------
+-- BENCHMARK
+--------------------------------------------------------------------------------
+
+local function benchmark(hash_func)
+   local measure_duration = 4.0   -- one measure duration would be approx. 4 sec
+   local part = ("\255"):rep(2^12)
+   local N = 1.0
+   local tm
+   repeat
+      N = N * 2
+      tm = os.clock()
+      local x = hash_func()
+      for j = 1, N do
+         x(part)
+      end
+      result = x()
+      tm = os.clock() - tm
+   until tm > 0.25
+   N = math.floor(N * (measure_duration / tm))
+   for _ = 1, 3 do
+      tm = os.clock()
+      local x = hash_func()
+      for j = 1, N do
+         x(part)
+      end
+      local result = x()
+      print('CPU seconds to hash 1 GByte:  ', math.floor(0.5 + 100 * (os.clock() - tm) * (2^30 / (#part * N))) / 100)
+   end
+end
+
+for _, fn in ipairs{"sha256", "sha512", "md5"} do
+   print()
+   print(fn:upper())
+   benchmark(sha2[fn])
+end
