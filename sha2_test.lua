@@ -287,6 +287,19 @@ local function test_md5()
 end
 
 
+local function test_sha1()
+
+   local sha1 = sha2.sha1
+
+   assert(sha1"" == "da39a3ee5e6b4b0d3255bfef95601890afd80709")
+   assert(sha1"abc" == "a9993e364706816aba3e25717850c26c9cd0d89d")
+   assert(sha1"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" == "84983e441c3bd26ebaae4aa1f95129e5e54670f1")
+   assert(sha1"The quick brown fox jumps over the lazy dog" == "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12")
+   assert(sha1"The quick brown fox jumps over the lazy cog" == "de9f2c7fd25e1b3afad3e85a0bd17d9b100db4b3")
+
+end
+
+
 local function test_all()
 
    test_sha256()
@@ -307,6 +320,8 @@ local function test_all()
 
    test_md5()
 
+   test_sha1()
+
    print"All tests passed"
 
 end
@@ -319,33 +334,33 @@ test_all()
 --------------------------------------------------------------------------------
 
 local function benchmark(hash_func)
-   local measure_duration = 4.0   -- one measure duration would be approx. 4 sec
+
+   local measure_duration = 2.0   -- one measure would take about 2 sec
+   local number_of_measures = 1
+
    local part = ("\255"):rep(2^12)
-   local N = 1.0
-   local tm
-   repeat
-      N = N * 2
-      tm = os.clock()
-      local x = hash_func()
-      for j = 1, N do
-         x(part)
-      end
-      result = x()
-      tm = os.clock() - tm
-   until tm > 0.25
-   N = math.floor(N * (measure_duration / tm))
-   for _ = 1, 3 do
-      tm = os.clock()
+   local N = 1
+   local function measure()
+      local tm = os.clock()
       local x = hash_func()
       for j = 1, N do
          x(part)
       end
       local result = x()
-      print('CPU seconds to hash 1 GByte:  ', math.floor(0.5 + 100 * (os.clock() - tm) * (2^30 / (#part * N))) / 100)
+      return os.clock() - tm, result
+   end
+   local tm
+   repeat
+      N = N * 2
+      tm = measure()
+   until tm > 0.2
+   N = math.floor(N * measure_duration / tm)
+   for _ = 1, number_of_measures do
+      print('CPU seconds to hash 1 GByte:  ', math.floor(0.5 + 2^30 / #part * 100 * measure() / N) / 100)
    end
 end
 
-for _, fn in ipairs{"sha256", "sha512", "md5"} do
+for _, fn in ipairs{"sha256", "sha512", "md5", "sha1"} do
    print()
    print(fn:upper())
    benchmark(sha2[fn])

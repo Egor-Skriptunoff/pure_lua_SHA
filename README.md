@@ -26,6 +26,7 @@ SHA-512/224    -- sha2.sha512_224()
 SHA-512/256    -- sha2.sha512_256()
 -- and a small bonus:
 MD5            -- sha2.md5()
+SHA-1          -- sha2.sha1()
 ```
 ---
 ### Usage
@@ -68,6 +69,20 @@ local your_hex_hash = sha2.sha256("your string")
 local your_binary_hash = your_hex_hash:gsub("%x%x", function(h) return h.char(tonumber(h, 16)) end)
 -- assert(your_binary_hash == "\209Mi\29\172p\234\218\20\217\242>\248\0\145\188\161\199\\\247|\241\205\\\242\208A\128\202\r\153\17")
 ```
+
+---
+* **Q:** How to calculate SHA2 digest of long data stream?
+* **A:**
+```lua
+local sha2 = require("sha2")
+local append = sha2.sha256()  -- if no string is provided as argument then "append" function is returned
+append("your")
+append(" st")                 -- you should pass substrings to that function (chunk-by-chunk)
+append("ring")
+local your_hash = append()    -- and finally ask for the result
+-- assert(your_hash == "d14d691dac70eada14d9f23ef80091bca1c75cf77cf1cd5cf2d04180ca0d9911")
+```
+
 ---
 ### Backward-compatibility
 This module will always keep backward-compatibility.  
