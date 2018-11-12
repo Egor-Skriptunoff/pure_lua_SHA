@@ -27,6 +27,7 @@ SHA-512/256    -- sha2.sha512_256()
 -- and a small bonus:
 MD5            -- sha2.md5()
 SHA-1          -- sha2.sha1()
+HMAC           -- sha2.hmac()
 ```
 ---
 ### Usage
@@ -49,8 +50,8 @@ See file "sha2_test.lua" for more examples.
 * **Q:** Does this module calculate SHA2 really fast?
 * **A:**  
 Probably, this is the fastest pure Lua implementation of SHA2 you can find.  
- For example, on x64 Lua 5.3 this module calculates SHA256 twice as fast as the implementation published at [lua-users.org](http://lua-users.org/wiki/SecureHashAlgorithmBw)  
- This module has best performance on every Lua version because it contains several version-specific implementation branches:  
+For example, on x64 Lua 5.3 this module calculates SHA256 twice as fast as the implementation published at [lua-users.org](http://lua-users.org/wiki/SecureHashAlgorithmBw)  
+This module has best performance on every Lua version because it contains several version-specific implementation branches:  
    - branch for **Lua 5.1** (emulating bitwise operators using look-up table)
    - branch for **Lua 5.2** (using **bit32** library), suitable also for **Lua 5.1** with external **bit** library
    - branch for **Lua 5.3 / 5.4** (using native **64**-bit bitwise operators)
@@ -62,12 +63,12 @@ Probably, this is the fastest pure Lua implementation of SHA2 you can find.
   
 ---
 * **Q:** How to get SHA2 digest as binary string instead of hexadecimal representation?
-* **A:**
+* **A:**  
+Use function `sha2.hex2bin()` to convert hexadecimal to binary:
 ```lua
 local sha2 = require("sha2")
-local your_hex_hash = sha2.sha256("your string")
-local your_binary_hash = your_hex_hash:gsub("%x%x", function(h) return h.char(tonumber(h, 16)) end)
--- assert(your_binary_hash == "\209Mi\29\172p\234\218\20\217\242>\248\0\145\188\161\199\\\247|\241\205\\\242\208A\128\202\r\153\17")
+local binary_hash = sha2.hex2bin(sha2.sha256("your string"))
+-- assert(binary_hash == "\209Mi\29\172p\234\218\20\217\242>\248\0\145\188\161\199\\\247|\241\205\\\242\208A\128\202\r\153\17")
 ```
 
 ---
@@ -81,6 +82,25 @@ append(" st")                 -- you should pass substrings to that function (ch
 append("ring")
 local your_hash = append()    -- and finally ask for the result
 -- assert(your_hash == "d14d691dac70eada14d9f23ef80091bca1c75cf77cf1cd5cf2d04180ca0d9911")
+```
+
+---
+* **Q:** How to calculate HMAC-SHA1 ?
+* **A:**
+```lua
+local sha2 = require("sha2")
+local your_hmac = sha2.hmac(sha2.sha1, "your key", "your message")
+-- assert(your_hmac == "317d0dfd868a5c06c9444ac1328aa3e2bfd29fb2")
+```
+The same in chunk-by-chunk mode (for long messages):
+```lua
+local sha2 = require("sha2")
+local append = sha2.hmac(sha2.sha1, "your key")
+append("your")
+append(" mess")
+append("age")
+local your_hmac = append()
+-- assert(your_hmac == "317d0dfd868a5c06c9444ac1328aa3e2bfd29fb2")
 ```
 
 ---

@@ -3,12 +3,12 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- MODULE: sha2
 --
--- VERSION: 5 (2018-11-10)
+-- VERSION: 6 (2018-11-12)
 --
 -- DESCRIPTION:
 --    This module contains functions to calculate SHA2 digest:
 --       SHA-224, SHA-256, SHA-384, SHA-512, SHA-512/224, SHA-512/256
---       and a bonus: MD5, SHA-1
+--       and a bonus: MD5, SHA-1, HMAC
 --    Written in pure Lua.
 --    Compatible with:
 --       Lua 5.1, Lua 5.2, Lua 5.3, Lua 5.4, Fengari, LuaJIT 2.0/2.1 (any CPU endianness).
@@ -37,11 +37,12 @@
 -- CHANGELOG:
 --  version     date      description
 --  -------  ----------   -----------
---     1     2018-10-06   First release
---     2     2018-10-07   Decreased module loading time in Lua 5.1 implementation branch (thanks to Peter Melnichenko for giving a hint)
---     3     2018-11-02   Bug fixed: incorrect hashing of long (2 GByte) data streams on Lua 5.3/5.4 built with "int32" integers
---     4     2018-11-03   Bonus added: MD5
+--     6     2018-11-12   HMAC added (applicable to any hash function from this module)
 --     5     2018-11-10   One more bonus added: SHA-1
+--     4     2018-11-03   Bonus added: MD5
+--     3     2018-11-02   Bug fixed: incorrect hashing of long (2 GByte) data streams on Lua 5.3/5.4 built with "int32" integers
+--     2     2018-10-07   Decreased module loading time in Lua 5.1 implementation branch (thanks to Peter Melnichenko for giving a hint)
+--     1     2018-10-06   First release
 -----------------------------------------------------------------------------
 
 
@@ -185,7 +186,7 @@ end
 -- BASIC 32-BIT BITWISE FUNCTIONS
 --------------------------------------------------------------------------------
 
-local AND, OR, XOR, SHL, SHR, ROL, ROR, NOT, NORM, HEX
+local AND, OR, XOR, SHL, SHR, ROL, ROR, NOT, NORM, HEX, XOR_BYTE
 -- Only low 32 bits of function arguments matter, high bits are ignored
 -- The result of all functions (except HEX) is an integer inside "correct range":
 --    for "bit" library:    (-2^31)..(2^31-1)
@@ -205,6 +206,7 @@ if branch == "FFI" or branch == "LJ" or branch == "LIB32" then
    NORM = b.tobit               -- only for LuaJIT
    HEX  = b.tohex               -- returns string of 8 lowercase hexadecimal digits
    assert(AND and OR and XOR and SHL and SHR and ROL and ROR and NOT, "Library '"..library_name.."' is incomplete")
+   XOR_BYTE = XOR               -- XOR of two bytes (only for HMAC), inputs and output are 0..255
 
 elseif branch == "EMUL" then
 
@@ -286,6 +288,10 @@ elseif branch == "EMUL" then
       return and_or_xor(x, y, 2)
    end
 
+   function XOR_BYTE(x, y)
+      return x + y - 2 * AND_of_two_bytes[x + y * 256]
+   end
+
 end
 
 HEX = HEX or
@@ -308,7 +314,8 @@ local sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64
 local sha2_K_lo, sha2_K_hi, sha2_H_lo, sha2_H_hi = {}, {}, {}, {}
 local sha2_H_ext256 = {[224] = {}, [256] = sha2_H_hi}
 local sha2_H_ext512_lo, sha2_H_ext512_hi = {[384] = {}, [512] = sha2_H_lo}, {[384] = {}, [512] = sha2_H_hi}
-local md5_K, md5_sha1_H, md5_next_shift = {}, {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0}, {0, 0, 0, 0, 0, 0, 0, 0, 28, 25, 26, 27, 0, 0, 10, 9, 11, 12, 0, 15, 16, 17, 18, 0, 20, 22, 23, 21}
+local md5_K, md5_sha1_H = {}, {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0}
+local md5_next_shift = {0, 0, 0, 0, 0, 0, 0, 0, 28, 25, 26, 27, 0, 0, 10, 9, 11, 12, 0, 15, 16, 17, 18, 0, 20, 22, 23, 21}
 
 local HEX64, XOR64A5   -- defined only for branches that internally use 64-bit integers: "INT64" and "FFI"
 local common_W = {}    -- temporary table shared between all calculations (to avoid creating new temporary table every time)
@@ -945,7 +952,7 @@ if branch == "INT64" then
 
    hi_factor = 4294967296
 
-   HEX64, XOR64A5, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64 = load[[
+   HEX64, XOR64A5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64 = load[[
       local md5_next_shift = ...
       local string_format, string_unpack = string.format, string.unpack
 
@@ -955,6 +962,10 @@ if branch == "INT64" then
 
       local function XOR64A5(x)
          return x ~ 0xa5a5a5a5a5a5a5a5
+      end
+
+      local function XOR_BYTE(x, y)
+         return x ~ y
       end
 
       local common_W = {}
@@ -1140,7 +1151,7 @@ if branch == "INT64" then
          H[1], H[2], H[3], H[4], H[5] = h1, h2, h3, h4, h5
       end
 
-      return HEX64, XOR64A5, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64
+      return HEX64, XOR64A5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64
    ]](md5_next_shift)
 
 end
@@ -1156,12 +1167,16 @@ if branch == "INT32" then
       return string_format("%08x", x)
    end
 
-   XOR32A5, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64 = load[[
+   XOR32A5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64 = load[[
       local md5_next_shift = ...
       local string_unpack, floor = string.unpack, math.floor
 
       local function XOR32A5(x)
          return x ~ 0xA5A5A5A5
+      end
+
+      local function XOR_BYTE(x, y)
+         return x ~ y
       end
 
       local common_W = {}
@@ -1383,7 +1398,7 @@ if branch == "INT32" then
          H[1], H[2], H[3], H[4], H[5] = h1, h2, h3, h4, h5
       end
 
-      return XOR32A5, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64
+      return XOR32A5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64
    ]](md5_next_shift)
 
 end
@@ -1728,7 +1743,7 @@ local function sha256ext(width, text)
             tail = tail..sub(text_part, #text_part + 1 - size_tail)
             return partial
          else
-            error("Adding more chunks is not allowed after receiving the final result", 2)
+            error("Adding more chunks is not allowed after receiving the result", 2)
          end
       else
          if tail then
@@ -1787,7 +1802,7 @@ local function sha512ext(width, text)
             tail = tail..sub(text_part, #text_part + 1 - size_tail)
             return partial
          else
-            error("Adding more chunks is not allowed after receiving the final result", 2)
+            error("Adding more chunks is not allowed after receiving the result", 2)
          end
       else
          if tail then
@@ -1852,7 +1867,7 @@ local function md5(text)
             tail = tail..sub(text_part, #text_part + 1 - size_tail)
             return partial
          else
-            error("Adding more chunks is not allowed after receiving the final result", 2)
+            error("Adding more chunks is not allowed after receiving the result", 2)
          end
       else
          if tail then
@@ -1908,7 +1923,7 @@ local function sha1(text)
             tail = tail..sub(text_part, #text_part + 1 - size_tail)
             return partial
          else
-            error("Adding more chunks is not allowed after receiving the final result", 2)
+            error("Adding more chunks is not allowed after receiving the result", 2)
          end
       else
          if tail then
@@ -1944,17 +1959,87 @@ local function sha1(text)
 end
 
 
+local function hex2bin(hex_string)
+   return (gsub(hex_string, "%x%x",
+      function (hh)
+         return char(tonumber(hh, 16))
+      end
+   ))
+end
+
+
+local block_size_for_HMAC  -- a table, will be defined at the end of the module
+
+local function pad_and_xor(str, result_length, byte_for_xor)
+   return gsub(str, ".",
+      function(c)
+         return char(XOR_BYTE(byte(c), byte_for_xor))
+      end
+   )..string_rep(char(byte_for_xor), result_length - #str)
+end
+
+local function hmac(hash_func, key, message)
+
+   -- Create an instance (private objects for current calculation)
+   local block_size = block_size_for_HMAC[hash_func]
+   if not block_size then
+      error("Unknown hash function", 2)
+   end
+   if #key > block_size then
+      key = hex2bin(hash_func(key))
+   end
+   local append = hash_func()(pad_and_xor(key, block_size, 0x36))
+   local result
+
+   local function partial(message_part)
+      if not message_part then
+         result = result or hash_func(pad_and_xor(key, block_size, 0x5C)..hex2bin(append()))
+         return result
+      elseif result then
+         error("Adding more chunks is not allowed after receiving the result", 2)
+      else
+         append(message_part)
+         return partial
+      end
+   end
+
+   if message then
+      -- Actually perform calculations and return the HMAC of a message
+      return partial(message)()
+   else
+      -- Return function for chunk-by-chunk loading of a message
+      -- User should feed every chunk of the message as single argument to this function and finally get HMAC by invoking this function without an argument
+      return partial
+   end
+
+end
+
+
 local sha2 = {
-   -- SHA2 functions:
+   -- SHA2 hash functions:
    sha256     = function (text) return sha256ext(256, text) end,  -- SHA-256
    sha224     = function (text) return sha256ext(224, text) end,  -- SHA-224
    sha512     = function (text) return sha512ext(512, text) end,  -- SHA-512
    sha384     = function (text) return sha512ext(384, text) end,  -- SHA-384
    sha512_224 = function (text) return sha512ext(224, text) end,  -- SHA-512/224
    sha512_256 = function (text) return sha512ext(256, text) end,  -- SHA-512/256
-   -- bonus:
+   -- other hash functions:
    md5        = md5,                                              -- MD5
    sha1       = sha1,                                             -- SHA-1
+   -- misc utilities:
+   hmac       = hmac,                                             -- HMAC (applicable to any hash function from this module)
+   hex2bin    = hex2bin,                                          -- converts hexadecimal representation to binary string
+}
+
+block_size_for_HMAC = {
+   [sha2.sha256]     = 64,  -- SHA-256
+   [sha2.sha224]     = 64,  -- SHA-224
+   [sha2.sha512]     = 128, -- SHA-512
+   [sha2.sha384]     = 128, -- SHA-384
+   [sha2.sha512_224] = 128, -- SHA-512/224
+   [sha2.sha512_256] = 128, -- SHA-512/256
+   [sha2.md5]        = 64,  -- MD5
+   [sha2.sha1]       = 64,  -- SHA-1
 }
 
 return sha2

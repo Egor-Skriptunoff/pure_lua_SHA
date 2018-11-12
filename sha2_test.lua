@@ -23,9 +23,9 @@ local function test_sha256()
    append_next_chunk(" jumps ")
    append_next_chunk("")              -- chunk may be an empty string
    append_next_chunk("over the lazy dog")
-   assert(append_next_chunk() == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")  -- invocation without an argument means "give me the final result"
+   assert(append_next_chunk() == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")  -- invocation without an argument means "give me the result"
    assert(append_next_chunk() == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")  -- you can ask the same result multiple times if needed
-   assert(not pcall(append_next_chunk, "more text"))  -- no more chunks are allowed after receiving the final result, append_next_chunk("more text") will fail
+   assert(not pcall(append_next_chunk, "more text"))  -- no more chunks are allowed after receiving the result, append_next_chunk("more text") will fail
 
    -- one-liner is possible due to "append_next_chunk(chunk)" returns the function "append_next_chunk"
    assert(sha256()("The quick brown fox")(" jumps ")("")("over the lazy dog")() == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")
@@ -300,6 +300,31 @@ local function test_sha1()
 end
 
 
+local function test_hmac()
+
+   local hmac = sha2.hmac
+
+   assert(hmac(sha2.sha1,   "your key", "your message") == "317d0dfd868a5c06c9444ac1328aa3e2bfd29fb2")
+   assert(hmac(sha2.sha512, "your key", "your message") == "2f5ddcdbd062a5392f07b0cd0262bf52c21bfb3db513296240cca8d5accc09d18d96be0a94995be4494c032f1eda946ad549fb61ccbe985d160f0b2f9588d34b")
+   assert(hmac(sha2.md5,    "", "") == "74e6f7298a9c2d168935f58c001bad88")
+   assert(hmac(sha2.sha256, "", "") == "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad")
+   assert(hmac(sha2.sha1,   "", "") == "fbdb1d1b18aa6c08324b7d64b71fb76370690e1d")
+   assert(hmac(sha2.md5,    "key", "The quick brown fox jumps over the lazy dog") == "80070713463e7749b90c2dc24911e275")
+   assert(hmac(sha2.sha256, "key", "The quick brown fox jumps over the lazy dog") == "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8")
+   assert(hmac(sha2.sha1,   "key", "The quick brown fox jumps over the lazy dog") == "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9")
+
+   -- chunk-by-chunk mode
+   local append = hmac(sha2.sha1, "key")
+   append("The quick brown fox")
+   append("")  -- empty string is allowed as a valid chunk
+   append(" jumps over the lazy dog")
+   assert(append() == "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9")  -- invocation without an argument receives the result
+
+   assert(not pcall(hmac, function(x) return sha2.sha256(x) end, "key", "message"))  -- must generate "unknown hash function" error
+
+end
+
+
 local function test_all()
 
    test_sha256()
@@ -321,6 +346,8 @@ local function test_all()
    test_md5()
 
    test_sha1()
+
+   test_hmac()
 
    print"All tests passed"
 
