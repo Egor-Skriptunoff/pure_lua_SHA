@@ -74,7 +74,7 @@ local binary_hash = sha2.hex2bin(sha2.sha256("your string"))
 ---
 * **Q:** How to get SHA2 digest as base64 string?
 * **A:**  
-There are two functions (`sha2.bin2base64()` and `sha2.base642bin()`) for converting between binary and base64:
+There are functions `sha2.bin2base64()` and `sha2.base642bin()` for converting between binary and base64:
 ```lua
 local sha2 = require("sha2")
 local binary_hash = sha2.hex2bin(sha2.sha256("your string"))
