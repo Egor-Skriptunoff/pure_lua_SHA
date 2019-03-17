@@ -325,6 +325,29 @@ local function test_hmac()
 end
 
 
+local function test_base64()
+
+   local bin_to_base64 = sha2.bin2base64
+   assert(bin_to_base64""       == ""        )
+   assert(bin_to_base64"f"      == "Zg=="    )
+   assert(bin_to_base64"fo"     == "Zm8="    )
+   assert(bin_to_base64"foo"    == "Zm9v"    )
+   assert(bin_to_base64"foob"   == "Zm9vYg==")
+   assert(bin_to_base64"fooba"  == "Zm9vYmE=")
+   assert(bin_to_base64"foobar" == "Zm9vYmFy")
+
+   local base64_to_bin = sha2.base642bin
+   assert(base64_to_bin""         == ""      )
+   assert(base64_to_bin"Zg=="     == "f"     )
+   assert(base64_to_bin"Zm8="     == "fo"    )
+   assert(base64_to_bin"Zm9v"     == "foo"   )
+   assert(base64_to_bin"Zm9vYg==" == "foob"  )
+   assert(base64_to_bin"Zm9vYmE=" == "fooba" )
+   assert(base64_to_bin"Zm9vYmFy" == "foobar")
+
+end
+
+
 local function test_all()
 
    test_sha256()
@@ -348,6 +371,8 @@ local function test_all()
    test_sha1()
 
    test_hmac()
+
+   test_base64()
 
    print"All tests passed"
 
