@@ -3,7 +3,7 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- MODULE: sha2
 --
--- VERSION: 6 (2018-11-12)
+-- VERSION: 7 (2019-03-17)
 --
 -- DESCRIPTION:
 --    This module contains functions to calculate SHA2 digest:
@@ -37,6 +37,7 @@
 -- CHANGELOG:
 --  version     date      description
 --  -------  ----------   -----------
+--     7     2019-03-17   Added functions to convert to/from base64
 --     6     2018-11-12   HMAC added (applicable to any hash function from this module)
 --     5     2018-11-10   One more bonus added: SHA-1
 --     4     2018-11-03   Bonus added: MD5
@@ -48,8 +49,8 @@
 
 local print_debug_messages = false  -- set to true to view some messages about your system's abilities and implementation branch chosen for your system
 
-local unpack, table_concat, byte, char, string_rep, sub, gsub, string_format, floor, ceil, tonumber =
-   table.unpack or unpack, table.concat, string.byte, string.char, string.rep, string.sub, string.gsub, string.format, math.floor, math.ceil, tonumber
+local unpack, table_concat, byte, char, string_rep, sub, gsub, gmatch, string_format, floor, ceil, tonumber =
+   table.unpack or unpack, table.concat, string.byte, string.char, string.rep, string.sub, string.gsub, string.gmatch, string.format, math.floor, math.ceil, tonumber
 
 --------------------------------------------------------------------------------
 -- EXAMINING YOUR SYSTEM
@@ -2014,6 +2015,59 @@ local function hmac(hash_func, key, message)
 
 end
 
+local bin2base64, base642bin
+do
+   local base64_symbols = {
+      ['+'] = 62, ['-'] = 62,  [62] = '+',
+      ['/'] = 63, ['_'] = 63,  [63] = '/',
+      ['='] = -1, ['.'] = -1,  [-1] = '='
+   }
+   local symbol_index = 0
+   for j, pair in ipairs{'AZ', 'az', '09'} do
+      for ascii = byte(pair), byte(pair, 2) do
+         local ch = char(ascii)
+         base64_symbols[ch] = symbol_index
+         base64_symbols[symbol_index] = ch
+         symbol_index = symbol_index + 1
+      end
+   end
+
+   function bin2base64(binary_string)
+      local result = {}
+      for pos = 1, #binary_string, 3 do
+         local c1, c2, c3, c4 = byte(sub(binary_string, pos, pos + 2)..'\0', 1, -1)
+         result[#result + 1] =
+            base64_symbols[floor(c1 / 4)]
+            ..base64_symbols[c1 % 4 * 16 + floor(c2 / 16)]
+            ..base64_symbols[c3 and c2 % 16 * 4 + floor(c3 / 64) or -1]
+            ..base64_symbols[c4 and c3 % 64 or -1]
+      end
+      return table_concat(result)
+   end
+   
+   function base642bin(base64_string)
+      local result, chars_qty = {}, 3
+      for pos, ch in gmatch(gsub(base64_string, '%s+', ''), '()(.)') do
+         local code = base64_symbols[ch]
+         if code < 0 then
+            chars_qty = chars_qty - 1
+            code = 0
+         end
+         local idx = pos % 4
+         if idx > 0 then
+            result[-idx] = code
+         else
+            local c1 = result[-1] * 4 + floor(result[-2] / 16)
+            local c2 = (result[-2] % 16) * 16 + floor(result[-3] / 4)
+            local c3 = (result[-3] % 4) * 64 + code
+            result[#result + 1] = sub(char(c1, c2, c3), 1, chars_qty)
+         end
+      end
+      return table_concat(result)
+   end
+   
+end   
+
 
 local sha2 = {
    -- SHA2 hash functions:
@@ -2029,6 +2083,8 @@ local sha2 = {
    -- misc utilities:
    hmac       = hmac,                                             -- HMAC (applicable to any hash function from this module)
    hex2bin    = hex2bin,                                          -- converts hexadecimal representation to binary string
+   base642bin = base642bin,                                       -- converts base64 representation to binary string
+   bin2base64 = bin2base64,                                       -- converts binary string to base64 representation
 }
 
 block_size_for_HMAC = {
