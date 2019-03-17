@@ -72,6 +72,17 @@ local binary_hash = sha2.hex2bin(sha2.sha256("your string"))
 ```
 
 ---
+* **Q:** How to get SHA2 digest as base64 string?
+* **A:**  
+There are two functions (`sha2.bin2base64()` and `sha2.base642bin()`) for converting between binary and base64:
+```lua
+local sha2 = require("sha2")
+local binary_hash = sha2.hex2bin(sha2.sha256("your string"))
+local base64_hash = sha2.bin2base64(binary_hash)
+-- assert(base64_hash == "0U1pHaxw6toU2fI++ACRvKHHXPd88c1c8tBBgMoNmRE=")
+```
+
+---
 * **Q:** How to calculate SHA2 digest of long data stream?
 * **A:**
 ```lua
