@@ -2,12 +2,12 @@
 -- TESTS of the module "sha2.lua"
 --------------------------------------------------------------------------------
 
-local sha2 = require"sha2"
+local sha = require"sha2"
 
 
 local function test_sha256()
 
-   local sha256 = sha2.sha256
+   local sha256 = sha.sha256
 
    -- some test strings
    assert(sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
@@ -109,7 +109,7 @@ end
 
 local function test_sha512()
 
-   local sha512 = sha2.sha512
+   local sha512 = sha.sha512
 
    assert(sha512("abc") == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f")
    assert(sha512("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu") == "8e959b75dae313da8cf4f72814fc143f8f7779c6eb9f7fa17299aeadb6889018501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909")
@@ -268,7 +268,7 @@ end
 
 local function test_md5()
 
-   local md5 = sha2.md5
+   local md5 = sha.md5
 
    assert(md5"" == "d41d8cd98f00b204e9800998ecf8427e")
    assert(md5"a" == "0cc175b9c0f1b6a831c399e269772661")
@@ -289,7 +289,7 @@ end
 
 local function test_sha1()
 
-   local sha1 = sha2.sha1
+   local sha1 = sha.sha1
 
    assert(sha1"" == "da39a3ee5e6b4b0d3255bfef95601890afd80709")
    assert(sha1"abc" == "a9993e364706816aba3e25717850c26c9cd0d89d")
@@ -300,34 +300,81 @@ local function test_sha1()
 end
 
 
+local function test_sha3()
+
+   assert(sha.sha3_224"" == "6b4e03423667dbb73b6e15454f0eb1abd4597f9a1b078e3f5b5a6bc7")
+   assert(sha.sha3_256"" == "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a")
+   assert(sha.sha3_384"" == "0c63a75b845e4f7d01107d852e4c2485c51a50aaaa94fc61995e71bbee983a2ac3713831264adb47fb6bd1e058d5f004")
+   assert(sha.sha3_512"" == "a69f73cca23a9ac5c8b567dc185a756e97c982164fe25859e0d1dcc1475c80a615b2123af1f5f94c11e3e9402c3ac558f500199d95b6d3e301758586281dcd26")
+   assert(sha.sha3_224"The quick brown fox jumps over the lazy dog" == "d15dadceaa4d5d7bb3b48f446421d542e08ad8887305e28d58335795")
+   assert(sha.sha3_256"The quick brown fox jumps over the lazy dog" == "69070dda01975c8c120c3aada1b282394e7f032fa9cf32f4cb2259a0897dfc04")
+   assert(sha.sha3_384"The quick brown fox jumps over the lazy dog" == "7063465e08a93bce31cd89d2e3ca8f602498696e253592ed26f07bf7e703cf328581e1471a7ba7ab119b1a9ebdf8be41")
+   assert(sha.sha3_512"The quick brown fox jumps over the lazy dog" == "01dedd5de4ef14642445ba5f5b97c15e47b9ad931326e4b0727cd94cefc44fff23f07bf543139939b49128caf436dc1bdee54fcb24023a08d9403f9b4bf0d450")
+   assert(sha.shake256(64, "") == "46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762fd75dc4ddd8c0f200cb05019d67b592f6fc821c49479ab48640292eacb3b7c4be")
+   assert(sha.shake256(25, ("€"):rep(45))  == "8f571c3d042d43f9072941f81862e34b7127cae59edc8092e7")      -- input data is 1 byte less than block size
+   assert(sha.shake256(26, ("€"):rep(90))  == "ea57f4ed3404c1a2a3f19d706cbc0971665104b49f8aea5569a2")    -- input data is 2 bytes less than two blocks
+   assert(sha.shake256(27, ("€"):rep(136)) == "8c1fe6c7831770ee3c5738f2ebfddff126e71e798daf26c0735a2f")  -- input data is exactly three blocks
+   assert(sha.shake256(150, "The quick brown fox jumps over the lazy dog") == "2f671343d9b2e1604dc9dcf0753e5fe15c7c64a0d283cbbf722d411a0e36f6ca1d01d1369a23539cd80f7c054b6e5daf9c962cad5b8ed5bd11998b40d5734442bed798f6e5c915bd8bb07e0188d0a55c1290074f1c287af06352299184492cbdec9acba737ee292e5adaa445547355e72a03a3bac3aac770fe5d6b66600ff15d37d5b4789994ea2aeb097f550aa5e88e4d8ff0ba07b8")
+   assert(sha.shake128(32, "") == "7f9c2ba4e88f827d616045507605853ed73b8093f6efbc88eb1a6eacfa66ef26")
+   assert(sha.shake128(32, "The quick brown fox jumps over the lazy dof") == "853f4538be0db9621a6cea659a06c1107b1f83f02b13d18297bd39d7411cf10c")
+   assert(sha.shake128(32, "The quick brown fox jumps over the lazy dog") == "f4202e3c5852f9182a0430fd8144f0a74b95e7417ecae17db0f8cfeed0e3e66e")
+   assert(sha.shake128(12, "The quick brown fox jumps over the lazy dog") == "f4202e3c5852f9182a0430fd")
+   assert(sha.shake128(11, "The quick brown fox jumps over the lazy dog") == "f4202e3c5852f9182a0430")
+   assert(sha.shake128(0,  "The quick brown fox jumps over the lazy dog") == "")
+
+   -- digest_size_in_bytes == (-1) means "generate infinite SHAKE-stream instead of fixed-width digest"
+   local get_next_part_of_digest = sha.shake128(-1, "The quick brown fox jumps over the lazy dog")
+   assert(get_next_part_of_digest(5) == "f4202e3c58") -- 5 bytes in hexadecimal representation
+   assert(get_next_part_of_digest()  == "52")         -- size=1 is assumed when omitted
+   assert(get_next_part_of_digest(0) == "")           -- size=0 is a valid size
+   assert(get_next_part_of_digest(4) == "f9182a04")   -- and so on to the infinity...
+
+   -- take long message (in chunk-by-chunk mode) and generate infinite SHAKE-stream
+   local append_input_message = sha.shake128(-1)
+   append_input_message("The quick brown fox")
+   append_input_message(" jumps over")
+   append_input_message(" the lazy dog")
+   local get_next_part_of_digest = append_input_message()  -- input stream is terminated, now starting to receive the output stream
+   assert(get_next_part_of_digest(5) == "f4202e3c58")      -- 5 bytes in hexadecimal representation
+   assert(get_next_part_of_digest(5) == "52f9182a04")      -- and so on to the infinity...
+
+end
+
+
 local function test_hmac()
 
-   local hmac = sha2.hmac
+   local hmac = sha.hmac
 
-   assert(hmac(sha2.sha1,   "your key", "your message") == "317d0dfd868a5c06c9444ac1328aa3e2bfd29fb2")
-   assert(hmac(sha2.sha512, "your key", "your message") == "2f5ddcdbd062a5392f07b0cd0262bf52c21bfb3db513296240cca8d5accc09d18d96be0a94995be4494c032f1eda946ad549fb61ccbe985d160f0b2f9588d34b")
-   assert(hmac(sha2.md5,    "", "") == "74e6f7298a9c2d168935f58c001bad88")
-   assert(hmac(sha2.sha256, "", "") == "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad")
-   assert(hmac(sha2.sha1,   "", "") == "fbdb1d1b18aa6c08324b7d64b71fb76370690e1d")
-   assert(hmac(sha2.md5,    "key", "The quick brown fox jumps over the lazy dog") == "80070713463e7749b90c2dc24911e275")
-   assert(hmac(sha2.sha256, "key", "The quick brown fox jumps over the lazy dog") == "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8")
-   assert(hmac(sha2.sha1,   "key", "The quick brown fox jumps over the lazy dog") == "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9")
+   assert(hmac(sha.sha1,   "your key", "your message") == "317d0dfd868a5c06c9444ac1328aa3e2bfd29fb2")
+   assert(hmac(sha.sha512, "your key", "your message") == "2f5ddcdbd062a5392f07b0cd0262bf52c21bfb3db513296240cca8d5accc09d18d96be0a94995be4494c032f1eda946ad549fb61ccbe985d160f0b2f9588d34b")
+   assert(hmac(sha.md5,    "", "") == "74e6f7298a9c2d168935f58c001bad88")
+   assert(hmac(sha.sha256, "", "") == "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad")
+   assert(hmac(sha.sha1,   "", "") == "fbdb1d1b18aa6c08324b7d64b71fb76370690e1d")
+   assert(hmac(sha.md5,    "key", "The quick brown fox jumps over the lazy dog") == "80070713463e7749b90c2dc24911e275")
+   assert(hmac(sha.sha256, "key", "The quick brown fox jumps over the lazy dog") == "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8")
+   assert(hmac(sha.sha1,   "key", "The quick brown fox jumps over the lazy dog") == "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9")
 
    -- chunk-by-chunk mode
-   local append = hmac(sha2.sha1, "key")
+   local append = hmac(sha.sha1, "key")
    append("The quick brown fox")
    append("")  -- empty string is allowed as a valid chunk
    append(" jumps over the lazy dog")
    assert(append() == "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9")  -- invocation without an argument receives the result
 
-   assert(not pcall(hmac, function(x) return sha2.sha256(x) end, "key", "message"))  -- must generate "unknown hash function" error
+   local key, message = ("\170"):rep(131), "Test Using Larger Than Block-Size Key - Hash Key First"
+   assert(hmac(sha.sha3_224, key, message) == "b4a1f04c00287a9b7f6075b313d279b833bc8f75124352d05fb9995f")
+   assert(hmac(sha.sha3_256, key, message) == "ed73a374b96c005235f948032f09674a58c0ce555cfc1f223b02356560312c3b")
+   assert(hmac(sha.sha3_384, key, message) == "0fc19513bf6bd878037016706a0e57bc528139836b9a42c3d419e498e0e1fb9616fd669138d33a1105e07c72b6953bcc")
+   assert(hmac(sha.sha3_512, key, message) == "00f751a9e50695b090ed6911a4b65524951cdc15a73a5d58bb55215ea2cd839ac79d2b44a39bafab27e83fde9e11f6340b11d991b1b91bf2eee7fc872426c3a4")
+
+   assert(not pcall(hmac, function(x) return sha.sha256(x) end, "key", "message"))  -- must raise "unknown hash function" error
 
 end
 
 
 local function test_base64()
 
-   local bin_to_base64 = sha2.bin2base64
+   local bin_to_base64 = sha.bin2base64
    assert(bin_to_base64""       == ""        )
    assert(bin_to_base64"f"      == "Zg=="    )
    assert(bin_to_base64"fo"     == "Zm8="    )
@@ -336,7 +383,7 @@ local function test_base64()
    assert(bin_to_base64"fooba"  == "Zm9vYmE=")
    assert(bin_to_base64"foobar" == "Zm9vYmFy")
 
-   local base64_to_bin = sha2.base642bin
+   local base64_to_bin = sha.base642bin
    assert(base64_to_bin""         == ""      )
    assert(base64_to_bin"Zg=="     == "f"     )
    assert(base64_to_bin"Zm8="     == "fo"    )
@@ -348,27 +395,30 @@ local function test_base64()
 end
 
 
+
 local function test_all()
-
-   test_sha256()
-
-   assert(sha2.sha224"abc" == "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7")
-   assert(sha2.sha224"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" == "75388b16512776cc5dba5da1fd890150b0c6455cb4f58b1952522525")
-
-   test_sha512()
-
-   assert(sha2.sha384"abc" == "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7")
-   assert(sha2.sha384"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu" == "09330c33f71147e83d192fc782cd1b4753111b173b3b05d22fa08086e3b0f712fcc7c71a557e2db966c3e9fa91746039")
-
-   assert(sha2.sha512_224"abc" == "4634270f707b6a54daae7530460842e20e37ed265ceee9a43e8924aa")
-   assert(sha2.sha512_224"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu" == "23fec5bb94d60b23308192640b0c453335d664734fe40e7268674af9")
-
-   assert(sha2.sha512_256"abc" == "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23")
-   assert(sha2.sha512_256"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu" == "3928e184fb8690f840da3988121d31be65cb9d3ef83ee6146feac861e19b563a")
 
    test_md5()
 
    test_sha1()
+
+   test_sha256()
+
+   assert(sha.sha224"abc" == "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7")
+   assert(sha.sha224"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" == "75388b16512776cc5dba5da1fd890150b0c6455cb4f58b1952522525")
+
+   test_sha512()
+
+   assert(sha.sha384"abc" == "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7")
+   assert(sha.sha384"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu" == "09330c33f71147e83d192fc782cd1b4753111b173b3b05d22fa08086e3b0f712fcc7c71a557e2db966c3e9fa91746039")
+
+   assert(sha.sha512_224"abc" == "4634270f707b6a54daae7530460842e20e37ed265ceee9a43e8924aa")
+   assert(sha.sha512_224"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu" == "23fec5bb94d60b23308192640b0c453335d664734fe40e7268674af9")
+
+   assert(sha.sha512_256"abc" == "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23")
+   assert(sha.sha512_256"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu" == "3928e184fb8690f840da3988121d31be65cb9d3ef83ee6146feac861e19b563a")
+
+   test_sha3()
 
    test_hmac()
 
@@ -381,17 +431,25 @@ end
 
 test_all()
 
+
 --------------------------------------------------------------------------------
 -- BENCHMARK
 --------------------------------------------------------------------------------
 
+local part = ("\165"):rep(2^7 * 3^2 * 13 * 17)   -- 254592 = least common multiple of all SHA functions' block lengths
+local number_of_measures = 5   -- number of measures for each SHA function (set to 1 if you're in a hurry)
+local measure_duration = 3.0   -- one measure would take about 3 sec (don't reduce this value)
+
+local function to3digit(x)
+   local n = math.floor(math.log(2*x)/math.log(10))
+   x = x / 10^n
+   -- Now: x in the range (0.5)...(5.0)
+   local four_digits = math.floor(x * 1000 + 0.5)
+   return math.floor(four_digits / 1000).."."..tostring(four_digits):sub(-3).."*10^"..n
+end
+
 local function benchmark(hash_func)
-
-   local measure_duration = 2.0   -- one measure would take about 2 sec
-   local number_of_measures = 1
-
-   local part = ("\255"):rep(2^12)
-   local N = 1
+   local N = 0.5
    local function measure()
       local tm = os.clock()
       local x = hash_func()
@@ -401,19 +459,27 @@ local function benchmark(hash_func)
       local result = x()
       return os.clock() - tm, result
    end
-   local tm
+   local seconds_passed
    repeat
       N = N * 2
-      tm = measure()
-   until tm > 0.2
-   N = math.floor(N * measure_duration / tm)
-   for _ = 1, number_of_measures do
-      print('CPU seconds to hash 1 GByte:  ', math.floor(0.5 + 2^30 / #part * 100 * measure() / N) / 100)
+      seconds_passed = measure()
+   until seconds_passed > measure_duration / 10
+   local N_calc = math.max(1, math.floor(N * measure_duration / seconds_passed + 0.5))
+   if N_calc ~= N then
+      N, seconds_passed = N_calc
+   end
+   local bytes_hashed = 1.0 * #part * N
+   for j = 1, number_of_measures do
+      seconds_passed = seconds_passed or measure()
+      local bytes_per_secods = bytes_hashed / seconds_passed
+      -- print('CPU seconds to hash 1 GByte:   '..math.floor(0.5 + 2^30 / bytes_per_secods * 100) / 100)
+      print('Hashing speed (Bytes per Second):   '..to3digit(bytes_per_secods))
+      seconds_passed = nil
    end
 end
 
-for _, fn in ipairs{"sha256", "sha512", "md5", "sha1"} do
+for _, fn in ipairs{"md5", "sha1", "sha256", "sha512", "sha512_256", "sha3_256", "sha3_512"} do
    print()
-   print(fn:upper())
-   benchmark(sha2[fn])
+   print(fn:gsub("_", "-"):upper())
+   benchmark(sha[fn])
 end
