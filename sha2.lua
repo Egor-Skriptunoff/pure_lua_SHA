@@ -1,7 +1,7 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- sha2.lua
 --------------------------------------------------------------------------------------------------------------------------
--- VERSION: 8 (2019-09-03)
+-- VERSION: 9 (2020-05-10)
 -- AUTHOR:  Egor Skriptunoff
 -- LICENSE: MIT (the same license as Lua itself)
 --
@@ -39,6 +39,7 @@
 -- CHANGELOG:
 --  version     date      description
 --  -------  ----------   -----------
+--     9     2020-05-10   Now works in OpenWrt's Lua (dialect of Lua 5.1 with "double" + "invisible int32")
 --     8     2019-09-03   SHA3 functions added
 --     7     2019-03-17   Added functions to convert to/from base64
 --     6     2018-11-12   HMAC added
@@ -304,10 +305,16 @@ elseif branch == "EMUL" then
 
 end
 
-HEX = HEX or
-   function (x) -- returns string of 8 lowercase hexadecimal digits
-      return string_format("%08x", x % 4294967296)
-   end
+HEX = HEX
+   or
+      pcall(string_format, "%x", 2^31) and
+      function (x)  -- returns string of 8 lowercase hexadecimal digits
+         return string_format("%08x", x % 4294967296)
+      end
+   or
+      function (x)  -- for OpenWrt's dialect of Lua
+         return string_format("%08x", (x + 2^31) % 2^32 - 2^31)
+      end
 
 local function XOR32A5(x)
    return XOR(x, 0xA5A5A5A5) % 4294967296
