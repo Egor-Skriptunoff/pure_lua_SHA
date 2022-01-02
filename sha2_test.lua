@@ -341,6 +341,134 @@ local function test_sha3()
 end
 
 
+local function test_blake2()
+
+   -- Test BLAKE2b
+   assert(sha.blake2b_384("") == "b32811423377f52d7862286ee1a72ee540524380fda1724a6f25d7978c6fd3244a6caf0498812673c5e05ef583825100")
+   assert(sha.blake2b_512("") == "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce")
+   assert(sha.blake2b("The quick brown fox jumps over the lazy dog") == "a8add4bdddfd93e4877d2746e62817b116364a1fa7bc148d95090bc7333b3673f82401cf7aa2e4cb1ecd90296e3f14cb5413f8ed77be73045b13914cdcd6a918")
+   assert(sha.blake2b("The quick brown fox jumps over the lazy dof") == "ab6b007747d8068c02e25a6008db8a77c218d94f3b40d2291a7dc8a62090a744c082ea27af01521a102e42f480a31e9844053f456b4b41e8aa78bbe5c12957bb")
+   assert(sha.blake2b("message") == "7bd9044c67faf33ba5cd8ae162680cd9d7a8d3180b15b39952737b8572dfced52b559acd6aa7f8c833a1b3172bd2771683c793c772d4abe3dd9bd9f63c204701")
+   assert(sha.blake2b("message", "key") == "550d438c7cd4e1861c529cf87c953e28370a62b11df72caf642bdd4b9fbef7997fdfe5db511d51c331260799fc68d4ce15ebe934498a494af9e77d4c88fb3efd")
+   assert(sha.blake2b("message", nil, "salt") == "416397711dc3785cb45f41678647ba9e3494f6cfaa4f92c3de7bf846fc389ee966daa972c6e0b441f4dd49ada1a52988dd24359fffcbb3469e29b29298a51ab8")
+   assert(sha.blake2b("message", "key", "salt") == "478c73516862923a4780520ac2236d38db45e26832e3f1a2440dddfeea3aea04ddbd0f2b3e48c680961f1d22e2c4428114d14f8afbd9bc3fc173b5507f1cab1f")
+   assert(sha.blake2b(("€"):rep(100)) == "f43189d7a60c822551415b8340c40cb6606581cb66bc48a9be4108fe7d8a4bbdefd7e5c72fe1526d8170ad068cb15b578348f01a8972020cb5c1207a23d6e134")
+   assert(sha.blake2b(("€"):rep(100), "100 euro") == "fcb4e39c94cc0a336570b6d0594c9d8110e598ada639705af8a6f5089dcb90a91846c6b0b4755fe86b6242c604a09c61f72590a2664a98e226748516d757f014")
+   do
+      local s = "my salt"           assert(#s <= 16)  -- "Salt" field
+      local p = "my personalizati"  assert(#p <= 16)  -- "Personalization" field
+      local salt = s..("\0"):rep(16-#s)..p            -- concatenation of "Salt" + "Personalization" fields
+      assert(sha.blake2b("my message", "my key", salt) == "9268e178f82c0980033ba4e6f7056612f2c37b8244601363cfa8f8ff959bab4e790fcb47afa0bd1142f69e9d61e4babd62b291eba57c521ae6d349b11b48a2e0")
+   end
+   assert(sha.blake2b(("\255"):rep(999), ("\255"):rep(64), ("\255"):rep(32)) == "0d8a6a5cf6e59853213d760fbc5cb66313e1d5182aecf9dc9eafe04f96e7888f0222940a57f937b353068f2a571e778769c6a840635738a86d234925cbd11e42")
+   assert(sha.blake2b(("\128"):rep(17), ("\128"):rep(17), ("\128"):rep(17)) == "47a679b056586be8f60346749e996c8c6e83ae8fc7e89a71fb0954c8e3a4b326d157082457390468b82ff048231c8ef5a8cd4ad0929800dcfd2e344f19409d26")
+   assert(sha.blake2b(("\128"):rep(9), ("\128"):rep(9), ("\128"):rep(9)) == "9739afd1184492ca2ac8e223d050981258d5739627762cbd64f06f5b0cb827522d13ee1b229f2ab660b554e59a6e25bea5c4a3633cf4703dcf998e5f211f48b4")
+   assert(sha.blake2b("your message", "your key") == "feee3e3aac7d5a3a4653fb70667ad6fb5fafe5256c78867b421eb0ce4134fc62784002b261056c4ef4222e99a8944826dff6f4845ac0117df128de116b159d75")
+   local append = sha.blake2b(nil, "your key")
+   append("your")
+   append(" message")
+   assert(append() == "feee3e3aac7d5a3a4653fb70667ad6fb5fafe5256c78867b421eb0ce4134fc62784002b261056c4ef4222e99a8944826dff6f4845ac0117df128de116b159d75")
+
+   -- Test BLAKE2s
+   assert(sha.blake2s_224("") == "1fa1291e65248b37b3433475b2a0dd63d54a11ecc4e3e034e7bc1ef4")
+   assert(sha.blake2s_256("") == "69217a3079908094e11121d042354a7c1f55b6482ca1a51e1b250dfd1ed0eef9")
+   assert(sha.blake2s("message") == "e6d7039c6d8c2ae1706e2cd3d2684e59d8b86ea9d21273a1e06263932ea367a4")
+   assert(sha.blake2s("message", "key") == "6167e07bf13af66076d94c1f6e395ee73b647d4c7013238d63808e805ae3ae59")
+   assert(sha.blake2s("message", nil, "salt") == "21faaaeeaa27906aa5465510b6640cb383d536ef6a1ef9e2b91fc4beccb1dcd0")
+   assert(sha.blake2s("message", "key", "salt") == "9953f155c11cb98eb4a62db577dc2ff6ff6c1a7b36c2b5ad3274f202bea23d67")
+   assert(sha.blake2s(("€"):rep(100)) == "d58876a6350bb985155de324df9239fa241b3bc80517d88282f19aaf77701eba")
+   assert(sha.blake2s(("€"):rep(100), "100 euro") == "9e54259e2ff40c09dbbed369e4c5a01a150ec01e31cb0565a2a445dcf9bf279d")
+   do
+      local s = "my salt"   assert(#s <= 8)  -- "Salt" field
+      local p = "my pers"   assert(#p <= 8)  -- "Personalization" field
+      local salt = s..("\0"):rep(8-#s)..p    -- concatenation of "Salt" + "Personalization" fields
+      assert(sha.blake2s("my message", "my key", salt) == "96d9b162046d282b81a651dcd5d49df05f67f6617bb56ad28cad22a7c1040bc8")
+   end
+   assert(sha.blake2s(("\255"):rep(999), ("\255"):rep(32), ("\255"):rep(16)) == "2502074ea85b4eb732c4296c82c662371ed80ca962920e0b6169030bf4633228")
+
+   -- Test BLAKE2bp
+   assert(sha.blake2bp("message") == "9cf494d3adfa1c639280b7e2101de182014fc142aec93d5a31c54c608158335e993a8955bf6f062e0669cad9ebdcdd0144da168460745528cb2a49c9528256a3")
+   assert(sha.blake2bp("message", "key") == "aeb49f2817db0ef5910fec836272de7be819a6017920dd6d94d9380b16f24d5d5c930adc6d147cc12dae984fbbc0379c4a333c98a28f2beb942752dca49838c5")
+   assert(sha.blake2bp("message", nil, "salt") == "b093b4ee84640dfe06a5eb21a0411b788d675c91b898a9efb5da4f819c54d2135a1d939af1f4b3b2fefea53cfa1ed77d2ef102ed19a65118593161a058e27a9f")
+   assert(sha.blake2bp("message", "key", "salt") == "bf71085230daaffdfadd3e2d745f733c3a7000a507a681b46198697f43cba7ae0c9f17b1231434a445f46734b5e21d51223d4760886a5fb5784a181d85f9bc53")
+
+   -- Test BLAKE2sp
+   assert(sha.blake2sp("message") == "c278b6c68e2ecfa36434c65acfec9076d797a1449d104ac454df200b8a429a96")
+   assert(sha.blake2sp("message", "key") == "09fd315f5347107d9b94de22f2abe2f358d029c0294c2b577f285c7b0c01d1db")
+   assert(sha.blake2sp("message", nil, "salt") == "5a93b13e04ac708d0bf1a1f855f32ff6eb8f9716a36cd18d5f1a5cdc89c8656e")
+   assert(sha.blake2sp("message", "key", "salt") == "d2b13f23784e5904967d0a94913523c9657b3e4c57c858217bf0074afbf895d3")
+   -- Want more test vectors for BLAKE2sp? You can get BLAKE2sp hash sum (no key, no salt) of any file using 7-Zip or RAR:
+   --    7-Zip (version 15.06+):
+   --       7z h -scrcblake2sp YOUR_FILE
+   --    RAR (version 5.0+):
+   --       rar a -m0 -ma -htb -inul tmp.rar YOUR_FILE && rar lt tmp.rar && rm tmp.rar
+   --       (for Windows users: replace "rm" with "del")
+
+   -- Test BLAKE2Xb
+   assert(sha.blake2xb(65, "message") == "90aa97980b876527d78da8639d91419b76a6cb93aa2bccf7ef69603c3b37a9c7c708662540400c523e304a7f50a65d64eb0d16a295d2e33a97455e958c73efc2c7")
+   assert(sha.blake2xb(65, "message", "key") == "2fcf18805eec564af2e24c5493b9038b1f652900b413b85d5f1b92ee4f281792ff2592657d915c4800d3ca026a47c4ec3692134a28a1f8d6cc310708bdfb501e46")
+   assert(sha.blake2xb(65, "message", nil, "salt") == "2885f976dd6eeb7253d0cd3dce63a5d8ab480d3288ef193b7bad722fe914f382ab3b929709f9370290222d06e133e047a6d8d8f09d46fa0f0961bedb3f55d74be5")
+   assert(sha.blake2xb(65, "message", "key", "salt") == "088dfd13d5cbab9505ae2e0d281bc1ca95dd74c0a00c021e1ffe63532a88ce43578fac63d99a596460af0d52ccbba21d2d7667384f3feff82a0507e4fc1180a6de")
+   local get_next_part_of_digest = sha.blake2xb(-16 * 2^20, "The quick brown fox jumps over the lazy dog")
+   assert(get_next_part_of_digest(5) == "53e2dcdfe2")
+   assert(get_next_part_of_digest()  == "1b")
+   assert(get_next_part_of_digest(0) == "")
+   assert(get_next_part_of_digest(3) == "21af5b")
+   get_next_part_of_digest("seek", 16 * 2^20 - 5)
+   assert(get_next_part_of_digest(5) == "b2b5312606")
+   assert(get_next_part_of_digest(1) == "")
+   get_next_part_of_digest("seek", 16 * 2^20 - 5)
+   assert(get_next_part_of_digest(555) == "b2b5312606")
+   get_next_part_of_digest("seek", -10)
+   assert(get_next_part_of_digest(15) == "53e2dcdfe2")
+   local append_input_message = sha.blake2xb(-16 * 2^20)
+   append_input_message("The quick brown fox")
+   append_input_message(" jumps over the lazy dog")
+   local get_next_part_of_digest = append_input_message()
+   assert(get_next_part_of_digest(4) == "53e2dcdf")
+   assert(get_next_part_of_digest(4) == "e21b21af")
+   local get_next_part_of_digest = sha.blake2xb(-1, "The quick brown fox jumps over the lazy dog")
+   assert(get_next_part_of_digest(5) == "364e84ca4c")
+   assert(get_next_part_of_digest(5) == "103df29230")
+   get_next_part_of_digest("seek", 10*2^30)
+   assert(get_next_part_of_digest(5) == "eeafce070f")
+   get_next_part_of_digest("seek", 0)
+   assert(get_next_part_of_digest(5.0) == "364e84ca4c")
+   get_next_part_of_digest("seek", 1)
+   assert(get_next_part_of_digest(5) == "4e84ca4c10")
+   get_next_part_of_digest("seek", -10)
+   assert(get_next_part_of_digest(20) == "5538642bb3ddedba69a4364e84ca4c103df29230")
+   get_next_part_of_digest("seek", 2^31-10)
+   assert(get_next_part_of_digest(20) == "e2a4267324dd36006f3a985f88b74111f494a73c")
+   get_next_part_of_digest("seek", 2^32-10)
+   assert(get_next_part_of_digest(20) == "d13c13778d4e4b59044c8a6126261b814814c280")
+   get_next_part_of_digest("seek", 64*2^31-10)
+   assert(get_next_part_of_digest(20) == "f638601af5aa9bac8b5f0ee69ee2970ff68cd3a3")
+   get_next_part_of_digest("seek", 64*2^32-10)
+   assert(get_next_part_of_digest(20) == "5538642bb3ddedba69a4364e84ca4c103df29230")
+
+   -- Test BLAKE2Xs
+   assert(sha.blake2xs(33, "message") == "a738fcffa5c656eebb0e7dc46fd8eafff960dcb46d36cb2896b444bfbbd623f910")
+   assert(sha.blake2xs(33, "message", "key") == "a7d460f42db67f6f07d85ae346ec5dba41ca056e67a366cef583f36f9e3d969d52")
+   assert(sha.blake2xs(33, "message", nil, "salt") == "8370c1b120c6ae76a5cdbf24bf8c082ed3d647127726f5da85a1c1ffd29e35335c")
+   assert(sha.blake2xs(33, "message", "key", "salt") == "f5d6f28e3720d789c847b65e2f1113792e6ac4da59fa653c10f3b0a9304021d7a1")
+   assert(sha.blake2xs(132, "your string") == "4fae7a4abcf47aec81991c370e8c716adc5bf7a142e932fc18b50d325f5ca7059fe7369fb86088b253dcbec9ff9fd168d5a229e507c9d984e9e8c0e1fa27824b51de5af9323594f0decd317ad3ed54aac7e5f816728fb39f7c3df873479f9063188566b788150a0dfaded9f06cf45aa1ef1bb80451e8f4dc8554ae790797188dce0e13fa")
+   local get_next_part_of_digest = sha.blake2xs(-1, "The quick brown fox jumps over the lazy dog")
+   assert(get_next_part_of_digest(10) == "0650cde4df888a06eada")
+   get_next_part_of_digest("seek", -10)
+   assert(get_next_part_of_digest(20) == "d2b24a4e7e4d924cfbe30650cde4df888a06eada")
+   get_next_part_of_digest("seek", 2^31-10)
+   assert(get_next_part_of_digest(20) == "c635d7a48f65efe8c65e65e076f41ad64504f6d1")
+   get_next_part_of_digest("seek", 2^32-10)
+   assert(get_next_part_of_digest(20) == "f9c9378e8778ce71d78e77c378116835376b1c46")
+   get_next_part_of_digest("seek", 32*2^31-10)
+   assert(get_next_part_of_digest(20) == "1ba18817e49f0319f7ef07da100f3419bc4db148")
+   get_next_part_of_digest("seek", 32*2^32-10)
+   assert(get_next_part_of_digest(20) == "d2b24a4e7e4d924cfbe30650cde4df888a06eada")
+
+end
+
+
 local function test_hmac()
 
    local hmac = sha.hmac
@@ -420,6 +548,8 @@ local function test_all()
 
    test_sha3()
 
+   test_blake2()
+
    test_hmac()
 
    test_base64()
@@ -478,7 +608,7 @@ local function benchmark(hash_func)
    end
 end
 
-for _, fn in ipairs{"md5", "sha1", "sha256", "sha512", "sha512_256", "sha3_256", "sha3_512"} do
+for _, fn in ipairs{"md5", "sha1", "sha256", "sha512", "sha3_256", "sha3_512", "blake2s", "blake2b"} do
    print()
    print(fn:gsub("_", "-"):upper())
    benchmark(sha[fn])
