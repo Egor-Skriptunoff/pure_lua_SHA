@@ -1,7 +1,7 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- sha2.lua
 --------------------------------------------------------------------------------------------------------------------------
--- VERSION: 10 (2022-01-02)
+-- VERSION: 11 (2022-01-09)
 -- AUTHOR:  Egor Skriptunoff
 -- LICENSE: MIT (the same license as Lua itself)
 --
@@ -12,7 +12,8 @@
 --       SHA-224, SHA-256, SHA-512/224, SHA-512/256, SHA-384, SHA-512,
 --       SHA3-224, SHA3-256, SHA3-384, SHA3-512, SHAKE128, SHAKE256,
 --       HMAC,
---       BLAKE2b, BLAKE2s, BLAKE2bp, BLAKE2sp, BLAKE2Xb, BLAKE2Xs
+--       BLAKE2b, BLAKE2s, BLAKE2bp, BLAKE2sp, BLAKE2Xb, BLAKE2Xs,
+--       BLAKE3, BLAKE3_KDF
 --    Written in pure Lua.
 --    Compatible with:
 --       Lua 5.1, Lua 5.2, Lua 5.3, Lua 5.4, Fengari, LuaJIT 2.0/2.1 (any CPU endianness).
@@ -40,6 +41,7 @@
 -- CHANGELOG:
 --  version     date      description
 --  -------  ----------   -----------
+--    11     2022-01-09   BLAKE3 added
 --    10     2022-01-02   BLAKE2 functions added
 --     9     2020-05-10   Now works in OpenWrt's Lua (dialect of Lua 5.1 with "double" + "invisible int32")
 --     8     2019-09-03   SHA-3 functions added
@@ -332,7 +334,7 @@ end
 --------------------------------------------------------------------------------
 
 -- Inner loop functions
-local sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128
+local sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128, blake3_feed_64
 
 -- Arrays of SHA-2 "magic numbers" (in "INT64" and "FFI" branches "*_lo" arrays contain 64-bit values)
 local sha2_K_lo, sha2_K_hi, sha2_H_lo, sha2_H_hi, sha3_RC_lo, sha3_RC_hi = {}, {}, {}, {}, {}, {}
@@ -356,6 +358,12 @@ local sigma = {
    {  7, 16, 15, 10, 12,  4,  1,  9, 13,  3, 14,  8,  2,  5, 11,  6 },
    { 11,  3,  9,  5,  8,  7,  2,  6, 16, 12, 10, 15,  4, 13, 14,  1 },
 };  sigma[11], sigma[12] = sigma[1], sigma[2]
+local perm_blake3 = {
+   1, 3, 4, 11, 13, 10, 12, 6,
+   1, 3, 4, 11, 13, 10,
+   2, 7, 5, 8, 14, 15, 16, 9,
+   2, 7, 5, 8, 14, 15,
+}
 
 local function build_keccak_format(elem)
    local keccak_format = {}
@@ -368,10 +376,13 @@ end
 
 if branch == "FFI" then
 
-
-   local common_W_FFI_int32 = ffi.new"int32_t[80]"   -- 64 is enough for SHA256, but 80 is needed for SHA-1
+   local common_W_FFI_int32 = ffi.new("int32_t[?]", 80)   -- 64 is enough for SHA256, but 80 is needed for SHA-1
    common_W_blake2s = common_W_FFI_int32
-   v_for_blake2s_feed_64 = ffi.new"int32_t[16]"
+   v_for_blake2s_feed_64 = ffi.new("int32_t[?]", 16)
+   perm_blake3 = ffi.new("uint8_t[?]", #perm_blake3 + 1, 0, unpack(perm_blake3))
+   for j = 1, 10 do
+      sigma[j] = ffi.new("uint8_t[?]", #sigma[j] + 1, 0, unpack(sigma[j]))
+   end;  sigma[11], sigma[12] = sigma[1], sigma[2]
 
 
    -- SHA256 implementation for "LuaJIT with FFI" branch
@@ -422,7 +433,7 @@ if branch == "FFI" then
    end
 
 
-   local common_W_FFI_int64 = ffi.new"int64_t[80]"
+   local common_W_FFI_int64 = ffi.new("int64_t[?]", 80)
    common_W_blake2b = common_W_FFI_int64
    local int64 = ffi.typeof"int64_t"
    local int32 = ffi.typeof"int32_t"
@@ -439,7 +450,7 @@ if branch == "FFI" then
       -- BLAKE2b implementation for "LuaJIT 2.1 + FFI" branch
 
       do
-         local v = ffi.new"int64_t[16]"
+         local v = ffi.new("int64_t[?]", 16)
          local W = common_W_blake2b
 
          local function G(a, b, c, d, k1, k2)
@@ -506,13 +517,13 @@ if branch == "FFI" then
 
       -- SHA-3 implementation for "LuaJIT 2.1 + FFI" branch
 
-      local lanes_arr64 = ffi.typeof"int64_t[30]"  -- 25 + 5 for temporary usage
+      local arr64_t = ffi.typeof"int64_t[?]"
       -- lanes array is indexed from 0
       lanes_index_base = 0
       hi_factor_keccak = int64(2^32)
 
       function create_array_of_lanes()
-         return lanes_arr64()
+         return arr64_t(30)  -- 25 + 5 for temporary usage
       end
 
       function keccak_feed(lanes, _, str, offs, size, block_size_in_bytes)
@@ -817,7 +828,7 @@ if branch == "FFI" then
       -- BLAKE2b implementation for "LuaJIT 2.0 + FFI" branch
 
       do
-         local v = ffi.new"int64_t[16]"
+         local v = ffi.new("int64_t[?]", 16)
          local W = common_W_blake2b
 
          local function G(a, b, c, d, k1, k2)
@@ -981,10 +992,10 @@ end
 if branch == "FFI" and not is_LuaJIT_21 or branch == "LJ" then
 
    if branch == "FFI" then
-      local lanes_arr32 = ffi.typeof"int32_t[31]"  -- 25 + 5 + 1 (due to 1-based indexing)
+      local arr32_t = ffi.typeof"int32_t[?]"
 
       function create_array_of_lanes()
-         return lanes_arr32()
+         return arr32_t(31)  -- 25 + 5 + 1 (due to 1-based indexing)
       end
 
    end
@@ -1420,7 +1431,7 @@ end
 if branch == "FFI" or branch == "LJ" then
 
 
-   -- BLAKE2s implementation for "LuaJIT with FFI" and "LuaJIT without FFI" branches
+   -- BLAKE2s and BLAKE3 implementations for "LuaJIT with FFI" and "LuaJIT without FFI" branches
 
    do
       local W = common_W_blake2s
@@ -1441,7 +1452,7 @@ if branch == "FFI" or branch == "LJ" then
 
       function blake2s_feed_64(H, str, offs, size, bytes_compressed, last_block_size, is_last_node)
          -- offs >= 0, size >= 0, size is multiple of 64
-         local h1, h2, h3, h4, h5, h6, h7, h8 = XOR(0, H[1]), XOR(0, H[2]), XOR(0, H[3]), XOR(0, H[4]), XOR(0, H[5]), XOR(0, H[6]), XOR(0, H[7]), XOR(0, H[8])
+         local h1, h2, h3, h4, h5, h6, h7, h8 = NORM(H[1]), NORM(H[2]), NORM(H[3]), NORM(H[4]), NORM(H[5]), NORM(H[6]), NORM(H[7]), NORM(H[8])
          for pos = offs, offs + size - 1, 64 do
             if str then
                for j = 1, 16 do
@@ -1451,7 +1462,7 @@ if branch == "FFI" or branch == "LJ" then
                end
             end
             v[0x0], v[0x1], v[0x2], v[0x3], v[0x4], v[0x5], v[0x6], v[0x7] = h1, h2, h3, h4, h5, h6, h7, h8
-            v[0x8], v[0x9], v[0xA], v[0xB], v[0xE], v[0xF] = XOR(0, sha2_H_hi[1]), XOR(0, sha2_H_hi[2]), XOR(0, sha2_H_hi[3]), XOR(0, sha2_H_hi[4]), XOR(0, sha2_H_hi[7]), XOR(0, sha2_H_hi[8])
+            v[0x8], v[0x9], v[0xA], v[0xB], v[0xE], v[0xF] = NORM(sha2_H_hi[1]), NORM(sha2_H_hi[2]), NORM(sha2_H_hi[3]), NORM(sha2_H_hi[4]), NORM(sha2_H_hi[7]), NORM(sha2_H_hi[8])
             bytes_compressed = bytes_compressed + (last_block_size or 64)
             local t0 = bytes_compressed % 2^32
             local t1 = floor(bytes_compressed / 2^32)
@@ -1487,7 +1498,58 @@ if branch == "FFI" or branch == "LJ" then
          return bytes_compressed
       end
 
+      function blake3_feed_64(str, offs, size, flags, chunk_index, H_in, H_out, wide_output, block_length)
+         -- offs >= 0, size >= 0, size is multiple of 64
+         block_length = block_length or 64
+         local h1, h2, h3, h4, h5, h6, h7, h8 = NORM(H_in[1]), NORM(H_in[2]), NORM(H_in[3]), NORM(H_in[4]), NORM(H_in[5]), NORM(H_in[6]), NORM(H_in[7]), NORM(H_in[8])
+         H_out = H_out or H_in
+         for pos = offs, offs + size - 1, 64 do
+            if str then
+               for j = 1, 16 do
+                  pos = pos + 4
+                  local a, b, c, d = byte(str, pos - 3, pos)
+                  W[j] = OR(SHL(d, 24), SHL(c, 16), SHL(b, 8), a)
+               end
+            end
+            v[0x0], v[0x1], v[0x2], v[0x3], v[0x4], v[0x5], v[0x6], v[0x7] = h1, h2, h3, h4, h5, h6, h7, h8
+            v[0x8], v[0x9], v[0xA], v[0xB] = NORM(sha2_H_hi[1]), NORM(sha2_H_hi[2]), NORM(sha2_H_hi[3]), NORM(sha2_H_hi[4])
+            v[0xC] = NORM(chunk_index % 2^32)   -- t0 = low_4_bytes(chunk_index)
+            v[0xD] = floor(chunk_index / 2^32)  -- t1 = high_4_bytes(chunk_index)
+            v[0xE], v[0xF] = block_length, flags
+            for j = 1, 7 do
+               G(0, 4,  8, 12, perm_blake3[j],      perm_blake3[j + 14])
+               G(1, 5,  9, 13, perm_blake3[j + 1],  perm_blake3[j + 2])
+               G(2, 6, 10, 14, perm_blake3[j + 16], perm_blake3[j + 7])
+               G(3, 7, 11, 15, perm_blake3[j + 15], perm_blake3[j + 17])
+               G(0, 5, 10, 15, perm_blake3[j + 21], perm_blake3[j + 5])
+               G(1, 6, 11, 12, perm_blake3[j + 3],  perm_blake3[j + 6])
+               G(2, 7,  8, 13, perm_blake3[j + 4],  perm_blake3[j + 18])
+               G(3, 4,  9, 14, perm_blake3[j + 19], perm_blake3[j + 20])
+            end
+            if wide_output then
+               H_out[ 9] = XOR(h1, v[0x8])
+               H_out[10] = XOR(h2, v[0x9])
+               H_out[11] = XOR(h3, v[0xA])
+               H_out[12] = XOR(h4, v[0xB])
+               H_out[13] = XOR(h5, v[0xC])
+               H_out[14] = XOR(h6, v[0xD])
+               H_out[15] = XOR(h7, v[0xE])
+               H_out[16] = XOR(h8, v[0xF])
+            end
+            h1 = XOR(v[0x0], v[0x8])
+            h2 = XOR(v[0x1], v[0x9])
+            h3 = XOR(v[0x2], v[0xA])
+            h4 = XOR(v[0x3], v[0xB])
+            h5 = XOR(v[0x4], v[0xC])
+            h6 = XOR(v[0x5], v[0xD])
+            h7 = XOR(v[0x6], v[0xE])
+            h8 = XOR(v[0x7], v[0xF])
+         end
+         H_out[1], H_out[2], H_out[3], H_out[4], H_out[5], H_out[6], H_out[7], H_out[8] = h1, h2, h3, h4, h5, h6, h7, h8
+      end
+
    end
+
 end
 
 
@@ -1500,8 +1562,8 @@ if branch == "INT64" then
    hi_factor_keccak = 4294967296
    lanes_index_base = 1
 
-   HEX64, XORA5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128 = load[=[-- branch "INT64"
-      local md5_next_shift, md5_K, sha2_K_lo, sha2_K_hi, build_keccak_format, sha3_RC_lo, sigma, common_W, sha2_H_lo, sha2_H_hi = ...
+   HEX64, XORA5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128, blake3_feed_64 = load[=[-- branch "INT64"
+      local md5_next_shift, md5_K, sha2_K_lo, sha2_K_hi, build_keccak_format, sha3_RC_lo, sigma, common_W, sha2_H_lo, sha2_H_hi, perm_blake3 = ...
       local string_format, string_unpack = string.format, string.unpack
 
       local function HEX64(x)
@@ -1814,7 +1876,7 @@ if branch == "INT64" then
          for pos = offs + 1, offs + size, 64 do
             if str then
                W[1], W[2], W[3], W[4], W[5], W[6], W[7], W[8], W[9], W[10], W[11], W[12], W[13], W[14], W[15], W[16] =
-                  string_unpack("<i4i4i4i4i4i4i4i4i4i4i4i4i4i4i4i4", str, pos)
+                  string_unpack("<I4I4I4I4I4I4I4I4I4I4I4I4I4I4I4I4", str, pos)
             end
             local v0, v1, v2, v3, v4, v5, v6, v7 = h1, h2, h3, h4, h5, h6, h7, h8
             local v8, v9, vA, vB, vC, vD, vE, vF = sha2_H_hi[1], sha2_H_hi[2], sha2_H_hi[3], sha2_H_hi[4], sha2_H_hi[5], sha2_H_hi[6], sha2_H_hi[7], sha2_H_hi[8]
@@ -2071,8 +2133,144 @@ if branch == "INT64" then
          return bytes_compressed
       end
 
-      return HEX64, XORA5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128
-   ]=](md5_next_shift, md5_K, sha2_K_lo, sha2_K_hi, build_keccak_format, sha3_RC_lo, sigma, common_W, sha2_H_lo, sha2_H_hi)
+      local function blake3_feed_64(str, offs, size, flags, chunk_index, H_in, H_out, wide_output, block_length)
+         -- offs >= 0, size >= 0, size is multiple of 64
+         block_length = block_length or 64
+         local W = common_W
+         local h1, h2, h3, h4, h5, h6, h7, h8 = H_in[1], H_in[2], H_in[3], H_in[4], H_in[5], H_in[6], H_in[7], H_in[8]
+         H_out = H_out or H_in
+         for pos = offs + 1, offs + size, 64 do
+            if str then
+               W[1], W[2], W[3], W[4], W[5], W[6], W[7], W[8], W[9], W[10], W[11], W[12], W[13], W[14], W[15], W[16] =
+                  string_unpack("<I4I4I4I4I4I4I4I4I4I4I4I4I4I4I4I4", str, pos)
+            end
+            local v0, v1, v2, v3, v4, v5, v6, v7 = h1, h2, h3, h4, h5, h6, h7, h8
+            local v8, v9, vA, vB = sha2_H_hi[1], sha2_H_hi[2], sha2_H_hi[3], sha2_H_hi[4]
+            local t0 = chunk_index % 2^32         -- t0 = low_4_bytes(chunk_index)
+            local t1 = (chunk_index - t0) / 2^32  -- t1 = high_4_bytes(chunk_index)
+            local vC, vD, vE, vF = 0|t0, 0|t1, block_length, flags
+            for j = 1, 7 do
+               v0 = v0 + v4 + W[perm_blake3[j]]
+               vC = vC ~ v0
+               vC = (vC & (1<<32)-1) >> 16 | vC << 16
+               v8 = v8 + vC
+               v4 = v4 ~ v8
+               v4 = (v4 & (1<<32)-1) >> 12 | v4 << 20
+               v0 = v0 + v4 + W[perm_blake3[j + 14]]
+               vC = vC ~ v0
+               vC = (vC & (1<<32)-1) >> 8 | vC << 24
+               v8 = v8 + vC
+               v4 = v4 ~ v8
+               v4 = (v4 & (1<<32)-1) >> 7 | v4 << 25
+               v1 = v1 + v5 + W[perm_blake3[j + 1]]
+               vD = vD ~ v1
+               vD = (vD & (1<<32)-1) >> 16 | vD << 16
+               v9 = v9 + vD
+               v5 = v5 ~ v9
+               v5 = (v5 & (1<<32)-1) >> 12 | v5 << 20
+               v1 = v1 + v5 + W[perm_blake3[j + 2]]
+               vD = vD ~ v1
+               vD = (vD & (1<<32)-1) >> 8 | vD << 24
+               v9 = v9 + vD
+               v5 = v5 ~ v9
+               v5 = (v5 & (1<<32)-1) >> 7 | v5 << 25
+               v2 = v2 + v6 + W[perm_blake3[j + 16]]
+               vE = vE ~ v2
+               vE = (vE & (1<<32)-1) >> 16 | vE << 16
+               vA = vA + vE
+               v6 = v6 ~ vA
+               v6 = (v6 & (1<<32)-1) >> 12 | v6 << 20
+               v2 = v2 + v6 + W[perm_blake3[j + 7]]
+               vE = vE ~ v2
+               vE = (vE & (1<<32)-1) >> 8 | vE << 24
+               vA = vA + vE
+               v6 = v6 ~ vA
+               v6 = (v6 & (1<<32)-1) >> 7 | v6 << 25
+               v3 = v3 + v7 + W[perm_blake3[j + 15]]
+               vF = vF ~ v3
+               vF = (vF & (1<<32)-1) >> 16 | vF << 16
+               vB = vB + vF
+               v7 = v7 ~ vB
+               v7 = (v7 & (1<<32)-1) >> 12 | v7 << 20
+               v3 = v3 + v7 + W[perm_blake3[j + 17]]
+               vF = vF ~ v3
+               vF = (vF & (1<<32)-1) >> 8 | vF << 24
+               vB = vB + vF
+               v7 = v7 ~ vB
+               v7 = (v7 & (1<<32)-1) >> 7 | v7 << 25
+               v0 = v0 + v5 + W[perm_blake3[j + 21]]
+               vF = vF ~ v0
+               vF = (vF & (1<<32)-1) >> 16 | vF << 16
+               vA = vA + vF
+               v5 = v5 ~ vA
+               v5 = (v5 & (1<<32)-1) >> 12 | v5 << 20
+               v0 = v0 + v5 + W[perm_blake3[j + 5]]
+               vF = vF ~ v0
+               vF = (vF & (1<<32)-1) >> 8 | vF << 24
+               vA = vA + vF
+               v5 = v5 ~ vA
+               v5 = (v5 & (1<<32)-1) >> 7 | v5 << 25
+               v1 = v1 + v6 + W[perm_blake3[j + 3]]
+               vC = vC ~ v1
+               vC = (vC & (1<<32)-1) >> 16 | vC << 16
+               vB = vB + vC
+               v6 = v6 ~ vB
+               v6 = (v6 & (1<<32)-1) >> 12 | v6 << 20
+               v1 = v1 + v6 + W[perm_blake3[j + 6]]
+               vC = vC ~ v1
+               vC = (vC & (1<<32)-1) >> 8 | vC << 24
+               vB = vB + vC
+               v6 = v6 ~ vB
+               v6 = (v6 & (1<<32)-1) >> 7 | v6 << 25
+               v2 = v2 + v7 + W[perm_blake3[j + 4]]
+               vD = vD ~ v2
+               vD = (vD & (1<<32)-1) >> 16 | vD << 16
+               v8 = v8 + vD
+               v7 = v7 ~ v8
+               v7 = (v7 & (1<<32)-1) >> 12 | v7 << 20
+               v2 = v2 + v7 + W[perm_blake3[j + 18]]
+               vD = vD ~ v2
+               vD = (vD & (1<<32)-1) >> 8 | vD << 24
+               v8 = v8 + vD
+               v7 = v7 ~ v8
+               v7 = (v7 & (1<<32)-1) >> 7 | v7 << 25
+               v3 = v3 + v4 + W[perm_blake3[j + 19]]
+               vE = vE ~ v3
+               vE = (vE & (1<<32)-1) >> 16 | vE << 16
+               v9 = v9 + vE
+               v4 = v4 ~ v9
+               v4 = (v4 & (1<<32)-1) >> 12 | v4 << 20
+               v3 = v3 + v4 + W[perm_blake3[j + 20]]
+               vE = vE ~ v3
+               vE = (vE & (1<<32)-1) >> 8 | vE << 24
+               v9 = v9 + vE
+               v4 = v4 ~ v9
+               v4 = (v4 & (1<<32)-1) >> 7 | v4 << 25
+            end
+            if wide_output then
+               H_out[ 9] = h1 ~ v8
+               H_out[10] = h2 ~ v9
+               H_out[11] = h3 ~ vA
+               H_out[12] = h4 ~ vB
+               H_out[13] = h5 ~ vC
+               H_out[14] = h6 ~ vD
+               H_out[15] = h7 ~ vE
+               H_out[16] = h8 ~ vF
+            end
+            h1 = v0 ~ v8
+            h2 = v1 ~ v9
+            h3 = v2 ~ vA
+            h4 = v3 ~ vB
+            h5 = v4 ~ vC
+            h6 = v5 ~ vD
+            h7 = v6 ~ vE
+            h8 = v7 ~ vF
+         end
+         H_out[1], H_out[2], H_out[3], H_out[4], H_out[5], H_out[6], H_out[7], H_out[8] = h1, h2, h3, h4, h5, h6, h7, h8
+      end
+
+      return HEX64, XORA5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128, blake3_feed_64
+   ]=](md5_next_shift, md5_K, sha2_K_lo, sha2_K_hi, build_keccak_format, sha3_RC_lo, sigma, common_W, sha2_H_lo, sha2_H_hi, perm_blake3)
 
 end
 
@@ -2088,8 +2286,8 @@ if branch == "INT32" then
       return string_format("%08x", x)
    end
 
-   XORA5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128 = load[=[-- branch "INT32"
-      local md5_next_shift, md5_K, sha2_K_lo, sha2_K_hi, build_keccak_format, sha3_RC_lo, sha3_RC_hi, sigma, common_W, sha2_H_lo, sha2_H_hi = ...
+   XORA5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128, blake3_feed_64 = load[=[-- branch "INT32"
+      local md5_next_shift, md5_K, sha2_K_lo, sha2_K_hi, build_keccak_format, sha3_RC_lo, sha3_RC_hi, sigma, common_W, sha2_H_lo, sha2_H_hi, perm_blake3 = ...
       local string_unpack, floor = string.unpack, math.floor
 
       local function XORA5(x, y)
@@ -2850,8 +3048,145 @@ if branch == "INT32" then
          return bytes_compressed
       end
 
-      return XORA5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128
-   ]=](md5_next_shift, md5_K, sha2_K_lo, sha2_K_hi, build_keccak_format, sha3_RC_lo, sha3_RC_hi, sigma, common_W, sha2_H_lo, sha2_H_hi)
+      local function blake3_feed_64(str, offs, size, flags, chunk_index, H_in, H_out, wide_output, block_length)
+         -- offs >= 0, size >= 0, size is multiple of 64
+         block_length = block_length or 64
+         local W = common_W
+         local h1, h2, h3, h4, h5, h6, h7, h8 = H_in[1], H_in[2], H_in[3], H_in[4], H_in[5], H_in[6], H_in[7], H_in[8]
+         H_out = H_out or H_in
+         for pos = offs + 1, offs + size, 64 do
+            if str then
+               W[1], W[2], W[3], W[4], W[5], W[6], W[7], W[8], W[9], W[10], W[11], W[12], W[13], W[14], W[15], W[16] =
+                  string_unpack("<i4i4i4i4i4i4i4i4i4i4i4i4i4i4i4i4", str, pos)
+            end
+            local v0, v1, v2, v3, v4, v5, v6, v7 = h1, h2, h3, h4, h5, h6, h7, h8
+            local v8, v9, vA, vB = sha2_H_hi[1], sha2_H_hi[2], sha2_H_hi[3], sha2_H_hi[4]
+            local t0 = chunk_index % 2^32         -- t0 = low_4_bytes(chunk_index)
+            local t1 = (chunk_index - t0) / 2^32  -- t1 = high_4_bytes(chunk_index)
+            t0 = (t0 + 2^31) % 2^32 - 2^31  -- convert to int32 range (-2^31)..(2^31-1) to avoid "number has no integer representation" error while ORing
+            local vC, vD, vE, vF = 0|t0, 0|t1, block_length, flags
+            for j = 1, 7 do
+               v0 = v0 + v4 + W[perm_blake3[j]]
+               vC = vC ~ v0
+               vC = vC >> 16 | vC << 16
+               v8 = v8 + vC
+               v4 = v4 ~ v8
+               v4 = v4 >> 12 | v4 << 20
+               v0 = v0 + v4 + W[perm_blake3[j + 14]]
+               vC = vC ~ v0
+               vC = vC >> 8 | vC << 24
+               v8 = v8 + vC
+               v4 = v4 ~ v8
+               v4 = v4 >> 7 | v4 << 25
+               v1 = v1 + v5 + W[perm_blake3[j + 1]]
+               vD = vD ~ v1
+               vD = vD >> 16 | vD << 16
+               v9 = v9 + vD
+               v5 = v5 ~ v9
+               v5 = v5 >> 12 | v5 << 20
+               v1 = v1 + v5 + W[perm_blake3[j + 2]]
+               vD = vD ~ v1
+               vD = vD >> 8 | vD << 24
+               v9 = v9 + vD
+               v5 = v5 ~ v9
+               v5 = v5 >> 7 | v5 << 25
+               v2 = v2 + v6 + W[perm_blake3[j + 16]]
+               vE = vE ~ v2
+               vE = vE >> 16 | vE << 16
+               vA = vA + vE
+               v6 = v6 ~ vA
+               v6 = v6 >> 12 | v6 << 20
+               v2 = v2 + v6 + W[perm_blake3[j + 7]]
+               vE = vE ~ v2
+               vE = vE >> 8 | vE << 24
+               vA = vA + vE
+               v6 = v6 ~ vA
+               v6 = v6 >> 7 | v6 << 25
+               v3 = v3 + v7 + W[perm_blake3[j + 15]]
+               vF = vF ~ v3
+               vF = vF >> 16 | vF << 16
+               vB = vB + vF
+               v7 = v7 ~ vB
+               v7 = v7 >> 12 | v7 << 20
+               v3 = v3 + v7 + W[perm_blake3[j + 17]]
+               vF = vF ~ v3
+               vF = vF >> 8 | vF << 24
+               vB = vB + vF
+               v7 = v7 ~ vB
+               v7 = v7 >> 7 | v7 << 25
+               v0 = v0 + v5 + W[perm_blake3[j + 21]]
+               vF = vF ~ v0
+               vF = vF >> 16 | vF << 16
+               vA = vA + vF
+               v5 = v5 ~ vA
+               v5 = v5 >> 12 | v5 << 20
+               v0 = v0 + v5 + W[perm_blake3[j + 5]]
+               vF = vF ~ v0
+               vF = vF >> 8 | vF << 24
+               vA = vA + vF
+               v5 = v5 ~ vA
+               v5 = v5 >> 7 | v5 << 25
+               v1 = v1 + v6 + W[perm_blake3[j + 3]]
+               vC = vC ~ v1
+               vC = vC >> 16 | vC << 16
+               vB = vB + vC
+               v6 = v6 ~ vB
+               v6 = v6 >> 12 | v6 << 20
+               v1 = v1 + v6 + W[perm_blake3[j + 6]]
+               vC = vC ~ v1
+               vC = vC >> 8 | vC << 24
+               vB = vB + vC
+               v6 = v6 ~ vB
+               v6 = v6 >> 7 | v6 << 25
+               v2 = v2 + v7 + W[perm_blake3[j + 4]]
+               vD = vD ~ v2
+               vD = vD >> 16 | vD << 16
+               v8 = v8 + vD
+               v7 = v7 ~ v8
+               v7 = v7 >> 12 | v7 << 20
+               v2 = v2 + v7 + W[perm_blake3[j + 18]]
+               vD = vD ~ v2
+               vD = vD >> 8 | vD << 24
+               v8 = v8 + vD
+               v7 = v7 ~ v8
+               v7 = v7 >> 7 | v7 << 25
+               v3 = v3 + v4 + W[perm_blake3[j + 19]]
+               vE = vE ~ v3
+               vE = vE >> 16 | vE << 16
+               v9 = v9 + vE
+               v4 = v4 ~ v9
+               v4 = v4 >> 12 | v4 << 20
+               v3 = v3 + v4 + W[perm_blake3[j + 20]]
+               vE = vE ~ v3
+               vE = vE >> 8 | vE << 24
+               v9 = v9 + vE
+               v4 = v4 ~ v9
+               v4 = v4 >> 7 | v4 << 25
+            end
+            if wide_output then
+               H_out[ 9] = h1 ~ v8
+               H_out[10] = h2 ~ v9
+               H_out[11] = h3 ~ vA
+               H_out[12] = h4 ~ vB
+               H_out[13] = h5 ~ vC
+               H_out[14] = h6 ~ vD
+               H_out[15] = h7 ~ vE
+               H_out[16] = h8 ~ vF
+            end
+            h1 = v0 ~ v8
+            h2 = v1 ~ v9
+            h3 = v2 ~ vA
+            h4 = v3 ~ vB
+            h5 = v4 ~ vC
+            h6 = v5 ~ vD
+            h7 = v6 ~ vE
+            h8 = v7 ~ vF
+         end
+         H_out[1], H_out[2], H_out[3], H_out[4], H_out[5], H_out[6], H_out[7], H_out[8] = h1, h2, h3, h4, h5, h6, h7, h8
+      end
+
+      return XORA5, XOR_BYTE, sha256_feed_64, sha512_feed_128, md5_feed_64, sha1_feed_64, keccak_feed, blake2s_feed_64, blake2b_feed_128, blake3_feed_64
+   ]=](md5_next_shift, md5_K, sha2_K_lo, sha2_K_hi, build_keccak_format, sha3_RC_lo, sha3_RC_hi, sigma, common_W, sha2_H_lo, sha2_H_hi, perm_blake3)
 
 end
 
@@ -2902,6 +3237,7 @@ if branch == "LIB32" or branch == "EMUL" then
       end
       H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8] = h1, h2, h3, h4, h5, h6, h7, h8
    end
+
 
    function sha512_feed_128(H_lo, H_hi, str, offs, size)
       -- offs >= 0, size >= 0, size is multiple of 128
@@ -3174,6 +3510,7 @@ if branch == "LIB32" or branch == "EMUL" then
       H[1], H[2], H[3], H[4], H[5] = h1, h2, h3, h4, h5
    end
 
+
    function keccak_feed(lanes_lo, lanes_hi, str, offs, size, block_size_in_bytes)
       -- This is an example of a Lua function having 79 local variables :-)
       -- offs >= 0, size >= 0, size is multiple of block_size_in_bytes, block_size_in_bytes is positive multiple of 8
@@ -3355,6 +3692,7 @@ if branch == "LIB32" or branch == "EMUL" then
       end
    end
 
+
    function blake2s_feed_64(H, str, offs, size, bytes_compressed, last_block_size, is_last_node)
       -- offs >= 0, size >= 0, size is multiple of 64
       local W = common_W
@@ -3491,6 +3829,7 @@ if branch == "LIB32" or branch == "EMUL" then
       H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8] = h1, h2, h3, h4, h5, h6, h7, h8
       return bytes_compressed
    end
+
 
    function blake2b_feed_128(H_lo, H_hi, str, offs, size, bytes_compressed, last_block_size, is_last_node)
       -- offs >= 0, size >= 0, size is multiple of 128
@@ -3740,6 +4079,146 @@ if branch == "LIB32" or branch == "EMUL" then
       return bytes_compressed
    end
 
+
+   function blake3_feed_64(str, offs, size, flags, chunk_index, H_in, H_out, wide_output, block_length)
+      -- offs >= 0, size >= 0, size is multiple of 64
+      block_length = block_length or 64
+      local W = common_W
+      local h1, h2, h3, h4, h5, h6, h7, h8 = H_in[1], H_in[2], H_in[3], H_in[4], H_in[5], H_in[6], H_in[7], H_in[8]
+      H_out = H_out or H_in
+      for pos = offs, offs + size - 1, 64 do
+         if str then
+            for j = 1, 16 do
+               pos = pos + 4
+               local a, b, c, d = byte(str, pos - 3, pos)
+               W[j] = ((d * 256 + c) * 256 + b) * 256 + a
+            end
+         end
+         local v0, v1, v2, v3, v4, v5, v6, v7 = h1, h2, h3, h4, h5, h6, h7, h8
+         local v8, v9, vA, vB = sha2_H_hi[1], sha2_H_hi[2], sha2_H_hi[3], sha2_H_hi[4]
+         local vC = chunk_index % 2^32         -- t0 = low_4_bytes(chunk_index)
+         local vD = (chunk_index - vC) / 2^32  -- t1 = high_4_bytes(chunk_index)
+         local vE, vF = block_length, flags
+         for j = 1, 7 do
+            v0 = v0 + v4 + W[perm_blake3[j]]
+            vC = XOR(vC, v0) % 2^32 / 2^16
+            vC = vC % 1 * (2^32 - 1) + vC
+            v8 = v8 + vC
+            v4 = XOR(v4, v8) % 2^32 / 2^12
+            v4 = v4 % 1 * (2^32 - 1) + v4
+            v0 = v0 + v4 + W[perm_blake3[j + 14]]
+            vC = XOR(vC, v0) % 2^32 / 2^8
+            vC = vC % 1 * (2^32 - 1) + vC
+            v8 = v8 + vC
+            v4 = XOR(v4, v8) % 2^32 / 2^7
+            v4 = v4 % 1 * (2^32 - 1) + v4
+            v1 = v1 + v5 + W[perm_blake3[j + 1]]
+            vD = XOR(vD, v1) % 2^32 / 2^16
+            vD = vD % 1 * (2^32 - 1) + vD
+            v9 = v9 + vD
+            v5 = XOR(v5, v9) % 2^32 / 2^12
+            v5 = v5 % 1 * (2^32 - 1) + v5
+            v1 = v1 + v5 + W[perm_blake3[j + 2]]
+            vD = XOR(vD, v1) % 2^32 / 2^8
+            vD = vD % 1 * (2^32 - 1) + vD
+            v9 = v9 + vD
+            v5 = XOR(v5, v9) % 2^32 / 2^7
+            v5 = v5 % 1 * (2^32 - 1) + v5
+            v2 = v2 + v6 + W[perm_blake3[j + 16]]
+            vE = XOR(vE, v2) % 2^32 / 2^16
+            vE = vE % 1 * (2^32 - 1) + vE
+            vA = vA + vE
+            v6 = XOR(v6, vA) % 2^32 / 2^12
+            v6 = v6 % 1 * (2^32 - 1) + v6
+            v2 = v2 + v6 + W[perm_blake3[j + 7]]
+            vE = XOR(vE, v2) % 2^32 / 2^8
+            vE = vE % 1 * (2^32 - 1) + vE
+            vA = vA + vE
+            v6 = XOR(v6, vA) % 2^32 / 2^7
+            v6 = v6 % 1 * (2^32 - 1) + v6
+            v3 = v3 + v7 + W[perm_blake3[j + 15]]
+            vF = XOR(vF, v3) % 2^32 / 2^16
+            vF = vF % 1 * (2^32 - 1) + vF
+            vB = vB + vF
+            v7 = XOR(v7, vB) % 2^32 / 2^12
+            v7 = v7 % 1 * (2^32 - 1) + v7
+            v3 = v3 + v7 + W[perm_blake3[j + 17]]
+            vF = XOR(vF, v3) % 2^32 / 2^8
+            vF = vF % 1 * (2^32 - 1) + vF
+            vB = vB + vF
+            v7 = XOR(v7, vB) % 2^32 / 2^7
+            v7 = v7 % 1 * (2^32 - 1) + v7
+            v0 = v0 + v5 + W[perm_blake3[j + 21]]
+            vF = XOR(vF, v0) % 2^32 / 2^16
+            vF = vF % 1 * (2^32 - 1) + vF
+            vA = vA + vF
+            v5 = XOR(v5, vA) % 2^32 / 2^12
+            v5 = v5 % 1 * (2^32 - 1) + v5
+            v0 = v0 + v5 + W[perm_blake3[j + 5]]
+            vF = XOR(vF, v0) % 2^32 / 2^8
+            vF = vF % 1 * (2^32 - 1) + vF
+            vA = vA + vF
+            v5 = XOR(v5, vA) % 2^32 / 2^7
+            v5 = v5 % 1 * (2^32 - 1) + v5
+            v1 = v1 + v6 + W[perm_blake3[j + 3]]
+            vC = XOR(vC, v1) % 2^32 / 2^16
+            vC = vC % 1 * (2^32 - 1) + vC
+            vB = vB + vC
+            v6 = XOR(v6, vB) % 2^32 / 2^12
+            v6 = v6 % 1 * (2^32 - 1) + v6
+            v1 = v1 + v6 + W[perm_blake3[j + 6]]
+            vC = XOR(vC, v1) % 2^32 / 2^8
+            vC = vC % 1 * (2^32 - 1) + vC
+            vB = vB + vC
+            v6 = XOR(v6, vB) % 2^32 / 2^7
+            v6 = v6 % 1 * (2^32 - 1) + v6
+            v2 = v2 + v7 + W[perm_blake3[j + 4]]
+            vD = XOR(vD, v2) % 2^32 / 2^16
+            vD = vD % 1 * (2^32 - 1) + vD
+            v8 = v8 + vD
+            v7 = XOR(v7, v8) % 2^32 / 2^12
+            v7 = v7 % 1 * (2^32 - 1) + v7
+            v2 = v2 + v7 + W[perm_blake3[j + 18]]
+            vD = XOR(vD, v2) % 2^32 / 2^8
+            vD = vD % 1 * (2^32 - 1) + vD
+            v8 = v8 + vD
+            v7 = XOR(v7, v8) % 2^32 / 2^7
+            v7 = v7 % 1 * (2^32 - 1) + v7
+            v3 = v3 + v4 + W[perm_blake3[j + 19]]
+            vE = XOR(vE, v3) % 2^32 / 2^16
+            vE = vE % 1 * (2^32 - 1) + vE
+            v9 = v9 + vE
+            v4 = XOR(v4, v9) % 2^32 / 2^12
+            v4 = v4 % 1 * (2^32 - 1) + v4
+            v3 = v3 + v4 + W[perm_blake3[j + 20]]
+            vE = XOR(vE, v3) % 2^32 / 2^8
+            vE = vE % 1 * (2^32 - 1) + vE
+            v9 = v9 + vE
+            v4 = XOR(v4, v9) % 2^32 / 2^7
+            v4 = v4 % 1 * (2^32 - 1) + v4
+         end
+         if wide_output then
+            H_out[ 9] = XOR(h1, v8)
+            H_out[10] = XOR(h2, v9)
+            H_out[11] = XOR(h3, vA)
+            H_out[12] = XOR(h4, vB)
+            H_out[13] = XOR(h5, vC)
+            H_out[14] = XOR(h6, vD)
+            H_out[15] = XOR(h7, vE)
+            H_out[16] = XOR(h8, vF)
+         end
+         h1 = XOR(v0, v8)
+         h2 = XOR(v1, v9)
+         h3 = XOR(v2, vA)
+         h4 = XOR(v3, vB)
+         h5 = XOR(v4, vC)
+         h6 = XOR(v5, vD)
+         h7 = XOR(v6, vE)
+         h8 = XOR(v7, vF)
+      end
+      H_out[1], H_out[2], H_out[3], H_out[4], H_out[5], H_out[6], H_out[7], H_out[8] = h1, h2, h3, h4, h5, h6, h7, h8
+   end
+
 end
 
 
@@ -3853,6 +4332,18 @@ do
       end
       local hi = next_bit() * m
       sha3_RC_hi[idx], sha3_RC_lo[idx] = hi, lo + hi * hi_factor_keccak
+   end
+end
+
+if branch == "FFI" then
+   sha2_K_hi = ffi.new("uint32_t[?]", #sha2_K_hi + 1, 0, unpack(sha2_K_hi))
+   sha2_K_lo = ffi.new("int64_t[?]",  #sha2_K_lo + 1, 0, unpack(sha2_K_lo))
+   --md5_K = ffi.new("uint32_t[?]", #md5_K + 1, 0, unpack(md5_K))
+   if hi_factor_keccak == 0 then
+      sha3_RC_lo = ffi.new("uint32_t[?]", #sha3_RC_lo + 1, 0, unpack(sha3_RC_lo))
+      sha3_RC_hi = ffi.new("uint32_t[?]", #sha3_RC_hi + 1, 0, unpack(sha3_RC_hi))
+   else
+      sha3_RC_lo = ffi.new("int64_t[?]", #sha3_RC_lo + 1, 0, unpack(sha3_RC_lo))
    end
 end
 
@@ -4212,12 +4703,20 @@ local function keccak(block_size_in_bytes, digest_size_in_bytes, is_SHAKE, messa
 end
 
 
-local hex_to_bin, bin_to_base64, base64_to_bin
+local hex_to_bin, bin_to_hex, bin_to_base64, base64_to_bin
 do
    function hex_to_bin(hex_string)
       return (gsub(hex_string, "%x%x",
          function (hh)
             return char(tonumber(hh, 16))
+         end
+      ))
+   end
+
+   function bin_to_hex(binary_string)
+      return (gsub(binary_string, ".",
+         function (c)
+            return string_format("%02x", byte(c))
          end
       ))
    end
@@ -4768,11 +5267,8 @@ local function blake2x(inner_func, inner_func_letter, common_W_blake2, block_siz
       XOF_digest_length = floor(XOF_digest_length_limit)
       chunk_by_chunk_output = true
    else
-      if digest_size_in_bytes <= 0 then
-         if digest_size_in_bytes == 0 then
-            return ""
-         end
-         digest_size_in_bytes = -digest_size_in_bytes
+      if digest_size_in_bytes < 0 then
+         digest_size_in_bytes = -1.0 * digest_size_in_bytes
          chunk_by_chunk_output = true
       end
       XOF_digest_length = floor(digest_size_in_bytes)
@@ -4888,6 +5384,225 @@ local function blake2xb(digest_size_in_bytes, message, key, salt)
 end
 
 
+local function blake3(message, key, digest_size_in_bytes, message_flags, K, return_array)
+   -- message:  binary string to be hashed (or nil for "chunk-by-chunk" input mode)
+   -- key:      (optional) binary string up to 32 bytes, by default empty string
+   -- digest_size_in_bytes: (optional) by default 32
+   --    0,1,2,3,4,...  = get finite digest as single Lua string
+   --    (-1)           = get infinite digest in "chunk-by-chunk" output mode
+   --    -2,-3,-4,...   = get finite digest in "chunk-by-chunk" output mode
+   -- The last three parameters "message_flags", "K" and "return_array" are for internal use only, user must omit them (or pass nil)
+   key = key or ""
+   digest_size_in_bytes = digest_size_in_bytes or 32
+   message_flags = message_flags or 0
+   if key == "" then
+      K = K or sha2_H_hi
+   else
+      local key_length = #key
+      if key_length > 32 then
+         error("BLAKE3 key length must not exceed 32 bytes", 2)
+      end
+      key = key..string_rep("\0", 32 - key_length)
+      K = {}
+      for j = 1, 8 do
+         local a, b, c, d = byte(key, 4*j-3, 4*j)
+         K[j] = ((d * 256 + c) * 256 + b) * 256 + a
+      end
+      message_flags = message_flags + 16  -- flag:KEYED_HASH
+   end
+   local tail, H, chunk_index, blocks_in_chunk, stack_size, stack = "", {}, 0, 0, 0, {}
+   local final_H_in, final_block_length, chunk_by_chunk_output, result, wide_output = K
+   local final_compression_flags = 3      -- flags:CHUNK_START,CHUNK_END
+
+   local function feed_blocks(str, offs, size)
+      -- size >= 0, size is multiple of 64
+      while size > 0 do
+         local part_size_in_blocks, block_flags, H_in = 1, 0, H
+         if blocks_in_chunk == 0 then
+            block_flags = 1               -- flag:CHUNK_START
+            H_in, final_H_in = K, H
+            final_compression_flags = 2   -- flag:CHUNK_END
+         elseif blocks_in_chunk == 15 then
+            block_flags = 2               -- flag:CHUNK_END
+            final_compression_flags = 3   -- flags:CHUNK_START,CHUNK_END
+            final_H_in = K
+         else
+            part_size_in_blocks = math_min(size / 64, 15 - blocks_in_chunk)
+         end
+         local part_size = part_size_in_blocks * 64
+         blake3_feed_64(str, offs, part_size, message_flags + block_flags, chunk_index, H_in, H)
+         offs, size = offs + part_size, size - part_size
+         blocks_in_chunk = (blocks_in_chunk + part_size_in_blocks) % 16
+         if blocks_in_chunk == 0 then
+            -- completing the currect chunk
+            chunk_index = chunk_index + 1.0
+            local divider = 2.0
+            while chunk_index % divider == 0 do
+               divider = divider * 2.0
+               stack_size = stack_size - 8
+               for j = 1, 8 do
+                  common_W_blake2s[j] = stack[stack_size + j]
+               end
+               for j = 1, 8 do
+                  common_W_blake2s[j + 8] = H[j]
+               end
+               blake3_feed_64(nil, 0, 64, message_flags + 4, 0, K, H)  -- flag:PARENT
+            end
+            for j = 1, 8 do
+               stack[stack_size + j] = H[j]
+            end
+            stack_size = stack_size + 8
+         end
+      end
+   end
+
+   local function get_hash_block(block_no)
+      local size = math_min(64, digest_size_in_bytes - block_no * 64)
+      if block_no < 0 or size <= 0 then
+         return ""
+      end
+      if chunk_by_chunk_output then
+         for j = 1, 16 do
+            common_W_blake2s[j] = stack[j + 16]
+         end
+      end
+      blake3_feed_64(nil, 0, 64, final_compression_flags, block_no, final_H_in, stack, wide_output, final_block_length)
+      if return_array then
+         return stack
+      end
+      local max_reg = ceil(size / 4)
+      for j = 1, max_reg do
+         stack[j] = HEX(stack[j])
+      end
+      return sub(gsub(table_concat(stack, "", 1, max_reg), "(..)(..)(..)(..)", "%4%3%2%1"), 1, size * 2)
+   end
+
+   local function partial(message_part)
+      if message_part then
+         if tail then
+            local offs = 0
+            if tail ~= "" and #tail + #message_part > 64 then
+               offs = 64 - #tail
+               feed_blocks(tail..sub(message_part, 1, offs), 0, 64)
+               tail = ""
+            end
+            local size = #message_part - offs
+            local size_tail = size > 0 and (size - 1) % 64 + 1 or 0
+            feed_blocks(message_part, offs, size - size_tail)
+            tail = tail..sub(message_part, #message_part + 1 - size_tail)
+            return partial
+         else
+            error("Adding more chunks is not allowed after receiving the result", 2)
+         end
+      else
+         if tail then
+            final_block_length = #tail
+            tail = tail..string_rep("\0", 64 - #tail)
+            if common_W_blake2s[0] then
+               for j = 1, 16 do
+                  local a, b, c, d = byte(tail, 4*j-3, 4*j)
+                  common_W_blake2s[j] = OR(SHL(d, 24), SHL(c, 16), SHL(b, 8), a)
+               end
+            else
+               for j = 1, 16 do
+                  local a, b, c, d = byte(tail, 4*j-3, 4*j)
+                  common_W_blake2s[j] = ((d * 256 + c) * 256 + b) * 256 + a
+               end
+            end
+            tail = nil
+            for stack_size = stack_size - 8, 0, -8 do
+               blake3_feed_64(nil, 0, 64, message_flags + final_compression_flags, chunk_index, final_H_in, H, nil, final_block_length)
+               chunk_index, final_block_length, final_H_in, final_compression_flags = 0, 64, K, 4  -- flag:PARENT
+               for j = 1, 8 do
+                  common_W_blake2s[j] = stack[stack_size + j]
+               end
+               for j = 1, 8 do
+                  common_W_blake2s[j + 8] = H[j]
+               end
+            end
+            final_compression_flags = message_flags + final_compression_flags + 8  -- flag:ROOT
+            if digest_size_in_bytes < 0 then
+               if digest_size_in_bytes == -1 then  -- infinite digest
+                  digest_size_in_bytes = math_huge
+               else
+                  digest_size_in_bytes = -1.0 * digest_size_in_bytes
+               end
+               chunk_by_chunk_output = true
+               for j = 1, 16 do
+                  stack[j + 16] = common_W_blake2s[j]
+               end
+            end
+            digest_size_in_bytes = math_min(2^53, digest_size_in_bytes)
+            wide_output = digest_size_in_bytes > 32
+            if chunk_by_chunk_output then
+               local pos, cached_block_no, cached_block = 0.0
+
+               local function get_next_part_of_digest(arg1, arg2)
+                  if arg1 == "seek" then
+                     -- Usage #1:  get_next_part_of_digest("seek", new_pos)
+                     pos = arg2 * 1.0
+                  else
+                     -- Usage #2:  hex_string = get_next_part_of_digest(size)
+                     local size, index = arg1 or 1, 32
+                     while size > 0 do
+                        local block_offset = pos % 64
+                        local block_no = (pos - block_offset) / 64
+                        local part_size = math_min(size, 64 - block_offset)
+                        if cached_block_no ~= block_no then
+                           cached_block_no = block_no
+                           cached_block = get_hash_block(block_no)
+                        end
+                        index = index + 1
+                        stack[index] = sub(cached_block, block_offset * 2 + 1, (block_offset + part_size) * 2)
+                        size = size - part_size
+                        pos = pos + part_size
+                     end
+                     return table_concat(stack, "", 33, index)
+                  end
+               end
+
+               result = get_next_part_of_digest
+            elseif digest_size_in_bytes <= 64 then
+               result = get_hash_block(0)
+            else
+               local last_block_no = ceil(digest_size_in_bytes / 64) - 1
+               for block_no = 0.0, last_block_no do
+                  stack[33 + block_no] = get_hash_block(block_no)
+               end
+               result = table_concat(stack, "", 33, 33 + last_block_no)
+            end
+         end
+         return result
+      end
+   end
+
+   if message then
+      -- Actually perform calculations and return the BLAKE3 digest of a message
+      return partial(message)()
+   else
+      -- Return function for chunk-by-chunk loading
+      -- User should feed every chunk of input data as single argument to this function and finally get BLAKE3 digest by invoking this function without an argument
+      return partial
+   end
+end
+
+local function blake3_derive_key(key_material, context_string, derived_key_size_in_bytes)
+   -- key_material: (string) your source of entropy to derive a key from (for example, it can be a master password)
+   --               set to nil for feeding the key material in "chunk-by-chunk" input mode
+   -- context_string: (string) unique description of the derived key
+   -- digest_size_in_bytes: (optional) by default 32
+   --    0,1,2,3,4,...  = get finite derived key as single Lua string
+   --    (-1)           = get infinite derived key in "chunk-by-chunk" output mode
+   --    -2,-3,-4,...   = get finite derived key in "chunk-by-chunk" output mode
+   if type(context_string) ~= "string" then
+      error("'context_string' parameter must be a Lua string", 2)
+   end
+   local K = blake3(context_string, nil, nil, 32, nil, true)           -- flag:DERIVE_KEY_CONTEXT
+   return blake3(key_material, nil, derived_key_size_in_bytes, 64, K)  -- flag:DERIVE_KEY_MATERIAL
+end
+
+
+
 local sha = {
    md5        = md5,                                                                                                                   -- MD5
    sha1       = sha1,                                                                                                                  -- SHA-1
@@ -4909,10 +5624,12 @@ local sha = {
    hmac       = hmac,  -- HMAC(hash_func, key, message) is applicable to any hash function from this module except SHAKE* and BLAKE*
    -- misc utilities:
    hex_to_bin    = hex_to_bin,     -- converts hexadecimal representation to binary string
+   bin_to_hex    = bin_to_hex,     -- converts binary string to hexadecimal representation
    base64_to_bin = base64_to_bin,  -- converts base64 representation to binary string
    bin_to_base64 = bin_to_base64,  -- converts binary string to base64 representation
-   -- old names for backward compatibility:
+   -- old style names for backward compatibility:
    hex2bin       = hex_to_bin,
+   bin2hex       = bin_to_hex,
    base642bin    = base64_to_bin,
    bin2base64    = bin_to_base64,
    -- BLAKE2 hash functions:
@@ -4932,22 +5649,25 @@ local sha = {
    blake2s_160 = function (message, key, salt) return blake2s(message, key, salt, 20) end, -- BLAKE2s-160
    blake2s_224 = function (message, key, salt) return blake2s(message, key, salt, 28) end, -- BLAKE2s-224
    blake2s_256 = blake2s,                                                      -- 32       -- BLAKE2s-256
+   -- BLAKE3 hash function
+   blake3            = blake3,             -- BLAKE3    (message, key, digest_size_in_bytes)
+   blake3_derive_key = blake3_derive_key,  -- BLAKE3_KDF(key_material, context_string, derived_key_size_in_bytes)
 }
 
 
 block_size_for_HMAC = {
-   [sha.md5]        = 64,
-   [sha.sha1]       = 64,
-   [sha.sha224]     = 64,
-   [sha.sha256]     = 64,
+   [sha.md5]        =  64,
+   [sha.sha1]       =  64,
+   [sha.sha224]     =  64,
+   [sha.sha256]     =  64,
    [sha.sha512_224] = 128,
    [sha.sha512_256] = 128,
    [sha.sha384]     = 128,
    [sha.sha512]     = 128,
-   [sha.sha3_224]   = (1600 - 2 * 224) / 8,
-   [sha.sha3_256]   = (1600 - 2 * 256) / 8,
-   [sha.sha3_384]   = (1600 - 2 * 384) / 8,
-   [sha.sha3_512]   = (1600 - 2 * 512) / 8,
+   [sha.sha3_224]   = 144,  -- (1600 - 2 * 224) / 8
+   [sha.sha3_256]   = 136,  -- (1600 - 2 * 256) / 8
+   [sha.sha3_384]   = 104,  -- (1600 - 2 * 384) / 8
+   [sha.sha3_512]   =  72,  -- (1600 - 2 * 512) / 8
 }
 
 
