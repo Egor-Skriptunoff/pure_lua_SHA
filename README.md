@@ -1,6 +1,6 @@
 # pure_lua_SHA
 
-SHA-1, SHA-2, SHA-3 and BLAKE2 functions written in pure Lua and optimized for speed.
+SHA-1, SHA-2, SHA-3, BLAKE2 and BLAKE3 functions written in pure Lua and optimized for speed.
 
 ---
 ### Installation
@@ -53,6 +53,9 @@ BLAKE2s-128    - sha.blake2s_128(message, key, salt)  -- BLAKE2s with digest_siz
 BLAKE2s-160    - sha.blake2s_160(message, key, salt)  -- BLAKE2s with digest_size_in_bytes = 20
 BLAKE2s-224    - sha.blake2s_224(message, key, salt)  -- BLAKE2s with digest_size_in_bytes = 28
 BLAKE2s-256    - sha.blake2s_256(message, key, salt)  -- BLAKE2s with digest_size_in_bytes = 32 (default size)
+-- BLAKE3
+BLAKE3         - sha.blake3(message, key, digest_size_in_bytes)
+BLAKE3_KDF     - sha.blake3_derive_key(key_material, context_string, derived_key_size_in_bytes)
 ```
 ---
 ### Usage
@@ -197,7 +200,12 @@ local get_next_part_of_digest = append_input_message()  -- input stream is termi
 assert(get_next_part_of_digest(5) == "f4202e3c58")
 assert(get_next_part_of_digest(5) == "52f9182a04")      -- and so on...
 ```
-Please note that you can not get the bytes at some arbitrary position of the SHAKE digest without calculating all previous bytes.
+Please note that you can NOT get the bytes at some arbitrary position of the SHAKE digest without calculating all previous bytes.
+
+---
+#### :large_blue_circle: Are BLAKE2bp / BLAKE2sp just a multithread-friendly implementations of BLAKE2b / BLAKE2s?
+No.  They are different hash functions.  
+For example, `sha.blake2s("message")` and `sha.blake2sp("message")` return different hashes.
 
 ---
 #### :large_blue_circle: Why does each BLAKE2 function have `digest_size_in_bytes` parameter?
@@ -209,7 +217,7 @@ By default the digest size is:
 
 If you need a shorter digest, specify the size in `digest_size_in_bytes` parameter.  
 Please note that the shorter result will NOT match the prefix of the full-length digest for the same message.  
-This happens because in BLAKE2 family of hash functions different `digest_size_in_bytes` values produce different hash functions. 
+This happens because in BLAKE2 family of hash functions different `digest_size_in_bytes` values produce different hash functions.
 
 If you need a longer digest, use BLAKE2Xb or BLAKE2Xs to produce digest of arbitrary size.
 
@@ -273,16 +281,30 @@ assert(get_next_part_of_digest(5) == "364e84ca4c")
 get_next_part_of_digest("seek", 1)        -- jump to the second byte of the digest
 assert(get_next_part_of_digest(5) == "4e84ca4c10")
 ```
+Please note that BLAKE2Xb / BLAKE2Xs are not continuations of BLAKE2b / BLAKE2s.  
+For example, `sha.blake2xb(64, "message")` is not the same as `sha.blake2b("message")`
+
 ---
-#### :large_blue_circle: Is the SHAKE / BLAKE2X "infinite digest" obtained by `digest_size_in_bytes = -1` really infinite ?
+#### :large_blue_circle: How to create digests of arbitrary size with BLAKE3?
+By default the digest size of BLAKE3 is 32 bytes (256 bits).  
+Unlike BLAKE2 family of separate functions for short (BLAKE2b) and long (BLAKE2Xb) digests, BLAKE3 is an "all-in-one" function.  
+You can produce BLAKE3 digest of arbitrary size by passing the size as `digest_size_in_bytes` argument.  
+Similar to BLAKE2, you can specify positive digest size, negative digest size or magic number `-1`.  
+Similar to BLAKE2, you can jump to arbitrary position in the digest.  
+Unlike BLAKE2, a shorter BLAKE3 digest is always a prefix of a longer digest for the same message.
+
+---
+#### :large_blue_circle: Is the SHAKE / BLAKE2X / BLAKE3 "infinite digest" obtained by `digest_size_in_bytes = -1` really infinite ?
 For SHAKE functions, the "infinite digest" is really infinite.  
 You can NOT fast forward to arbitrary position without calculating all previous bytes of the digest.
 
-For BLAKE2X functions, the "infinite digest" is NOT infinite - it is periodic with a large period (256GiB for BLAKE2Xb and 128GiB for BLAKE2Xs).  
-The period size equals to 2^32 times inner function digest size.  
-For example, digest size of BLAKE2b is 64 bytes, so the period of BLAKE2Xb is `64*2^32 = 256*2^30` bytes.  
+For BLAKE2X functions, the "infinite digest" is NOT infinite, it is periodic with a large period: 256GiB for BLAKE2Xb and 128GiB for BLAKE2Xs.  
 You can fast forward to arbitrary position.  
 Please note that `get_next_part_of_digest("seek", 256*2^30)` is equivalent to `get_next_part_of_digest("seek", 0)` due to periodicity.
+
+For BLAKE3 function, the "infinite digest" is NOT infinite, it is periodic with a huge period: `2^70` bytes.  
+This implementation is able to produce only the first `2^53` bytes of this period.  
+You can fast forward to arbitrary position, but you will receive empty strings instead of hexadecimal digest for positions beyond `2^53`.
 
 ---
 #### :large_blue_circle: What is the `salt` parameter in all BLAKE2 functions?
@@ -318,48 +340,101 @@ In other words, BLAKE2 functions implemented in this module expect `salt` parame
 
 ---
 #### :large_blue_circle: There are two methods of BLAKE2 hash function customization: adding `key` and adding `salt`.  What is the difference?
-
 Processing the `key` is significantly more expensive (in terms of CPU load) than processing the `salt`.  
 Adding `key` is equivalent to prepending a whole block of data (128 bytes for BLAKE2b, 64 bytes for BLAKE2s) to the message, hashing this additional block is a lot of extra CPU work.  
 Adding `salt` is equivalent to modifying initialization vectors with the salt string, this is just a few XOR operations.  
 Usually `key` is used for secret strings and `salt` for non-secret strings.  
-One might guess that `key` is somehow more securely protected than `salt`, but actually `salt` can also store secret strings (very similar hash function BLAKE3 processes its `key` exactly the same way as `salt` is processed in BLAKE2).
+One might guess that `key` is somehow more securely protected than `salt`, but actually `salt` can also store secret strings (very similar hash function BLAKE3 processes its `key` exactly the same non-expensive way as `salt` is processed in BLAKE2).
+
+---
+#### :large_blue_circle: BLAKE3 does not have `salt` parameter.  How to use salted BLAKE3?
+If you want to add salt to key-less BLAKE3, just pass your salt instead of `key`.  
+If you want to add salt to keyed BLAKE3, see the next question.
+
+---
+#### :large_blue_circle: I can personalize keyed BLAKE2 function by providing both `salt` and `key` arguments simultaneously. How to personalize keyed BLAKE3?
+Derive personalized key and pass it to BLAKE3.
+```lua
+-----------------------------------------------------------------
+-- A personalized keyed hash function constructor using BLAKE2
+-----------------------------------------------------------------
+local function create_personalized_keyed_hash_function(key, personalization_string, digest_size_in_bytes)
+   return function (message)
+      -- pass the personalization string to BLAKE2
+      return sha.blake2b(message, key, personalization_string, digest_size_in_bytes)
+   end
+end
+
+-----------------------------------------------------------------
+-- The same constructor using BLAKE3
+-----------------------------------------------------------------
+local function create_personalized_keyed_hash_function(key, personalization_string, digest_size_in_bytes)
+   -- create personalized 256-bit key
+   local derived_key = sha.hex_to_bin(sha.blake3_derive_key(key, personalization_string))
+   return function (message)
+      -- pass the personalized key to BLAKE3
+      return sha.blake3(message, derived_key, digest_size_in_bytes)
+   end
+end
+
+-----------------------------------------------------------------
+-- Usage example for the constructor
+-----------------------------------------------------------------
+local password = "password"
+-- create two different 160-bit hash functions depending on the same password
+local H1 = create_personalized_keyed_hash_function(password, "personalization string 1", 20)
+local H2 = create_personalized_keyed_hash_function(password, "personalization string 2", 20)
+-- use them
+local hash1 = H1("message")
+local hash2 = H2("message")
+```
+---
+#### :large_blue_circle: Why deriving keys?
+There are two reasons:
+- Derived keys have an important security benefit: if the "context string" (a.k.a "personalization string") is globally unique then leaking this derived key does not leak information about other keys derived from the same key material.  
+- You might need to convert long and sparse entropy source (a.k.a "key material") into a fixed-size key.  Deriving a key is one of possible ways to make such conversion.
+
+---
+#### :large_blue_circle: How to use function `blake3_derive_key`?
+The `key_material` parameter must be either a Lua string (of any length) or a sequence of substrings (switch to "chunk-by-chunk" input mode by passing `nil` as `key_material`).  
+The `context_string` parameter must be a Lua string (of any length), it is recommended to use globally unique string literal (to make sure it does not depend on malicious user input).  
+By default `derived_key_size_in_bytes` is 32, but you can derive key of arbitrary size: you can pass a positive value, a negative value or magic value `-1` as `derived_key_size_in_bytes`.  A note: "infinite derived key" is limited by `2^53` bytes.  
+You probably would want to convert hexadecimal output of `blake3_derive_key` to binary Lua string, because all hash functions implemented in this module expect their `key` parameter to be a binary string of limited size.
 
 ---
 #### :large_blue_circle: I need a secure hash function in my Lua script.  Which one is the fastest?
-MD5 is not secure, so six competitors remain: SHA-1, SHA-256, BLAKE2s, SHA-512, SHA3-256, BLAKE2b.  
+MD5 and SHA-1 are not secure (collisions are known), so six competitors remain: SHA-256, BLAKE2s, BLAKE3, SHA-512, BLAKE2b, SHA3-256.  
 (The first three internally use 32-bit words, the last three - 64-bit words.)  
-If these hash functions implemented in C, the fastest one will be BLAKE2, because BLAKE2 benefits from SIMD instructions in modern CPUs.  
+If these hash functions implemented in C, the fastest one will be BLAKE3 because it benefits from SIMD instructions in modern CPUs.  
 But in Lua we can not tell the compiler to use SIMD instructions, so the winner is different.
 
-| Lua version               | The fastest        | 2nd                 | 3rd                 |
-| ------------------------- | ------------------ | ------------------- | ------------------- |
-| Lua 5.1                   | SHA1  (0.4 MB/s)   | BLAKE2s  (0.4 MB/s) | BLAKE2b  (0.3 MB/s) |
-| Lua 5.2                   | SHA1  (2.9 MB/s)   | BLAKE2s  (2.4 MB/s) | BLAKE2b  (1.6 MB/s) |
-| Lua 5.4                   | BLAKE2b  (18 MB/s) | BLAKE2s  (9.5 MB/s) | SHA1  (8.7 MB/s)    |
-| LuaJIT sandboxed (no FFI) | SHA1  (180 MB/s)   | SHA256  (140 MB/s)  | BLAKE2s  (100 MB/s) |
-| LuaJIT 2.0 + FFI          | SHA1  (330 MB/s)   | SHA256  (190 MB/s)  | BLAKE2s  (160 MB/s) |
-| LuaJIT 2.1 + FFI          | SHA1  (330 MB/s)   | SHA512  (200 MB/s)  | SHA256  (190 MB/s)  |
+| Lua version      | The fastest        | 2nd                 | 3rd                 | 4th                 |
+| ---------------- | ------------------ | ------------------- | ------------------- | ------------------- |
+| Lua 5.1          | BLAKE3  (0.5 MB/s) | BLAKE2s  (0.4 MB/s) | BLAKE2b  (0.3 MB/s) | SHA256  (0.2 MB/s)  |
+| Lua 5.2          | BLAKE3  (3.1 MB/s) | BLAKE2s  (2.4 MB/s) | BLAKE2b  (1.6 MB/s) | SHA256  (1.5 MB/s)  |
+| Lua 5.4          | BLAKE2b  (18 MB/s) | BLAKE3  (11 MB/s)   | BLAKE2s  (10 MB/s)  | SHA512  (8 MB/s)    |
+| LuaJIT sandboxed | SHA256  (140 MB/s) | BLAKE3  (130 MB/s)  | BLAKE2s  (100 MB/s) | SHA3-256  (33 MB/s) |
+| LuaJIT + FFI     | BLAKE3  (300 MB/s) | BLAKE2s  (260 MB/s) | SHA512  (220 MB/s)  | BLAKE2b  (220 MB/s) |
 
 ---
 #### :large_blue_circle: I need a hash function for hashing user passwords.  Which one should I use?
 Strictly speaking, you should NOT use a general-purpose hash functions for hashing passwords in a serious application, instead you should use Argon2 or the like.  
 But probably your Lua script does not have a lot of RAM for a good password hashing algorithm.  
-So, as a workaround, you can calculate salted BLAKE2 10000 times:
+So, as a workaround, you can calculate salted BLAKE3 thousands of times:
 ```lua
 local sha = require("sha2")
 local function hash_user_password(user_id, user_name, user_password)
-   local user_salt = (tostring(user_id)..user_name):sub(1, 16)
+   local user_salt = (tostring(user_id).."\0"..user_name):sub(1, 32)
+   local f = sha.blake3
    local hash = user_password
-   local f = sha.blake2s
-   for i = 1, 10000 do
-      hash = f(hash, nil, user_salt)
+   for i = 1, 10000 do  -- tune the repeat count to get about 0.1 second of CPU work
+      hash = f(hash, user_salt)
    end
    return hash  -- string of 64 hex digits
 end
 ```
 ---
-#### :large_blue_circle: Why does this module called "sha2.lua" despite of having implemented all SHA functions (SHA1, SHA2, SHA3) and BLAKE2?
+#### :large_blue_circle: Why does this module called "sha2.lua" despite of having implemented SHA1, SHA2, SHA3, BLAKE2 and BLAKE3?
 The first release of this module contained only SHA2 functions, hence the name `sha2.lua`.  
 But I can't rename the module due to backward-compatibility I've promised to keep forever (Was it a silly promise?)
 
