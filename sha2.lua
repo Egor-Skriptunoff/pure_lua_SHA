@@ -1,7 +1,7 @@
 --------------------------------------------------------------------------------------------------------------------------
 -- sha2.lua
 --------------------------------------------------------------------------------------------------------------------------
--- VERSION: 11 (2022-01-09)
+-- VERSION: 12 (2022-02-23)
 -- AUTHOR:  Egor Skriptunoff
 -- LICENSE: MIT (the same license as Lua itself)
 --
@@ -41,6 +41,7 @@
 -- CHANGELOG:
 --  version     date      description
 --  -------  ----------   -----------
+--    12     2022-02-23   Now works in Luau (but NOT optimized for speed)
 --    11     2022-01-09   BLAKE3 added
 --    10     2022-01-02   BLAKE2 functions added
 --     9     2020-05-10   Now works in OpenWrt's Lua (dialect of Lua 5.1 with "double" + "invisible int32")
@@ -116,7 +117,7 @@ assert(Lua_has_int64 or Lua_has_int32 or not Lua_has_integers, "Lua integers mus
 --   Using "int128" instead of "int64" is not OK: "int128" would require different branch of implementation for optimized SHA512.
 
 -- Check for LuaJIT and 32-bit bitwise libraries
-local is_LuaJIT = ({false, [1] = true})[1] and (type(jit) ~= "table" or jit.version_num >= 20000)  -- LuaJIT 1.x.x is treated as vanilla Lua 5.1
+local is_LuaJIT = ({false, [1] = true})[1] and _VERSION ~= "Luau" and (type(jit) ~= "table" or jit.version_num >= 20000)  -- LuaJIT 1.x.x and Luau are treated as vanilla Lua 5.1/5.2
 local is_LuaJIT_21  -- LuaJIT 2.1+
 local LuaJIT_arch
 local ffi           -- LuaJIT FFI library (as a table)
