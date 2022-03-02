@@ -4,7 +4,7 @@
 -- VERSION: 12 (2022-02-23)
 -- AUTHOR:  Egor Skriptunoff
 -- LICENSE: MIT (the same license as Lua itself)
---
+-- URL:     https://github.com/Egor-Skriptunoff/pure_lua_SHA
 --
 -- DESCRIPTION:
 --    This module contains functions to calculate SHA digest:
