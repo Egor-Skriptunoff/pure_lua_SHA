@@ -5653,6 +5653,9 @@ local sha = {
    -- BLAKE3 hash function
    blake3            = blake3,             -- BLAKE3    (message, key, digest_size_in_bytes)
    blake3_derive_key = blake3_derive_key,  -- BLAKE3_KDF(key_material, context_string, derived_key_size_in_bytes)
+   -- Let user detect which implementation is being used
+   branch     = branch,
+   method     = method,
 }
 
 
