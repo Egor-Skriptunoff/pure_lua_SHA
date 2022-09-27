@@ -4818,6 +4818,25 @@ local function hmac(hash_func, key, message)
    end
 end
 
+local function strXOR(s1, s2)
+   local s=""
+   for i=1,#s1 do
+      s=s..char(XOR(s1:byte(i),s2:byte(i)))
+   end
+   return s
+end
+
+local function pbkdf2(hash_func, pw, salt, it)
+   local u = hex_to_bin(hmac(hash_func, pw, salt.."\0\0\0\1"))
+   local t = u
+
+   for _ = 2, it do
+      u = hex_to_bin(hmac(hash_func, pw, u))
+      t = strXOR(t, u)
+   end
+
+   return bin_to_hex(t)
+end
 
 local function xor_blake2_salt(salt, letter, H_lo, H_hi)
    -- salt: concatenation of "Salt"+"Personalization" fields
@@ -5623,6 +5642,8 @@ local sha = {
    shake256   = function (digest_size_in_bytes, message) return keccak((1600 - 2 * 256) / 8, digest_size_in_bytes, true, message) end, -- SHAKE256
    -- HMAC:
    hmac       = hmac,  -- HMAC(hash_func, key, message) is applicable to any hash function from this module except SHAKE* and BLAKE*
+   -- PBKDF2:
+   pbkdf2     = pbkdf2,-- PBKDF2(hash_func, password, salt, iter_num) same limit with HMAC
    -- misc utilities:
    hex_to_bin    = hex_to_bin,     -- converts hexadecimal representation to binary string
    bin_to_hex    = bin_to_hex,     -- converts binary string to hexadecimal representation
