@@ -4706,20 +4706,18 @@ end
 
 local hex_to_bin, bin_to_hex, bin_to_base64, base64_to_bin
 do
+   local function repl_hex2bin(hh)
+      return char(tonumber(hh, 16))
+   end
    function hex_to_bin(hex_string)
-      return (gsub(hex_string, "%x%x",
-         function (hh)
-            return char(tonumber(hh, 16))
-         end
-      ))
+      return (gsub(hex_string, "%x%x", repl_hex2bin))
    end
 
+   local function repl_bin2hex(c)
+      return string_format("%02x", byte(c))
+   end
    function bin_to_hex(binary_string)
-      return (gsub(binary_string, ".",
-         function (c)
-            return string_format("%02x", byte(c))
-         end
-      ))
+      return (gsub(binary_string, ".", repl_bin2hex))
    end
 
    local base64_symbols = {
